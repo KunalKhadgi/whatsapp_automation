@@ -1,0 +1,2 @@
+[console_scripts]
+chroma-migrate = chroma_migrate.cli:run_cli

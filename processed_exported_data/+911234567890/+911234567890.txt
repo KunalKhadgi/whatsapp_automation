@@ -1,0 +1,1 @@
+01/05/2025, 15:48 - CmdTester: Hello from CMD one-liner!

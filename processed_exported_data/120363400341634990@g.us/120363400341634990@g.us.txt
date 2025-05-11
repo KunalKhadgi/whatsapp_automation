@@ -1,0 +1,45 @@
+29/04/2025, 11:28 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+29/04/2025, 11:43 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this 
+
+Either we can fine tune and get a new model for this 
+OR 
+Re-define your custom GPT logic in prompt
+29/04/2025, 11:43 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+with 4* backup in google cloud ...
+29/04/2025, 11:47 - You: yes
+29/04/2025, 11:47 - You: working on this
+30/04/2025, 14:23 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 14:23 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 14:23 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 14:23 - You: yes
+30/04/2025, 14:23 - You: working on this
+30/04/2025, 15:12 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 15:12 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 15:12 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 15:12 - You: yes
+30/04/2025, 15:12 - You: working on this
+30/04/2025, 15:12 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 15:12 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 15:12 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 15:12 - You: yes
+30/04/2025, 15:12 - You: working on this
+30/04/2025, 19:18 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 19:18 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 19:18 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 19:18 - You: yes
+30/04/2025, 19:18 - You: working on this
+30/04/2025, 19:18 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 19:18 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 19:18 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 19:18 - You: yes
+30/04/2025, 19:18 - You: working on this
+30/04/2025, 19:18 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 19:18 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 19:18 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 19:18 - You: yes
+30/04/2025, 19:18 - You: working on this
+30/04/2025, 19:18 - You: sanidhya, as discussed make the cloud account and share the credentials ...
+30/04/2025, 19:18 - You: @919111587811 for our next step to link db to our custom GPT:- I checked there is no direct way to do this
+30/04/2025, 19:18 - You: we are using ultramsg WhatsApp API and new messages are stored in PC folder structure
+30/04/2025, 19:18 - You: yes
+30/04/2025, 19:18 - You: working on this

@@ -1,0 +1,3122 @@
+28/04/2025, 13:53 - You: ,
+28/04/2025, 14:55 - You: WhatsApp API on UltraMsg.com works good
+29/04/2025, 19:08 - Kunal Khadgi: .
+29/04/2025, 19:22 - Kunal Khadgi: I sent u the invoice of 10$
+29/04/2025, 20:01 - Kunal Khadgi: jsut last part is remaining from my side ... to integrate it with custom gpt
+code is able to fetch the chat from db
+29/04/2025, 20:01 - Kunal Khadgi: yes
+29/04/2025, 20:30 - Kunal Khadgi: invoice of 5$
+29/04/2025, 20:40 - Kunal Khadgi: https://chatgpt.com/share/6810ebd4-0e40-800b-a772-5533703da0a7
+29/04/2025, 20:41 - Kunal Khadgi: https://chatgpt.com/share/6810ebd4-0e40-800b-a772-5533703da0a7
+29/04/2025, 20:46 - Kunal Khadgi: I have created a custom gpt named WhatsApp Chat in ur pro version 
+
+U can chat there
+29/04/2025, 20:46 - Kunal Khadgi: I have created a custom gpt named WhatsApp Chat in ur pro version 
+
+U can chat there
+29/04/2025, 21:05 - Kunal Khadgi: https://chatgpt.com/share/6810ebd4-0e40-800b-a772-5533703da0a7
+29/04/2025, 21:06 - Kunal Khadgi: I have created a custom gpt named WhatsApp Chat in ur pro version 
+
+U can chat there
+29/04/2025, 21:33 - Kunal Khadgi: can call now
+29/04/2025, 21:33 - Kunal Khadgi: can call now
+29/04/2025, 21:33 - Kunal Khadgi: can call now
+29/04/2025, 21:36 - Kunal Khadgi: have u logged in ultramsg and setup the webhook url?
+29/04/2025, 21:36 - Kunal Khadgi: have u logged in ultramsg and setup the webhook url?
+29/04/2025, 21:38 - Kunal Khadgi: currently only this data is stored in db
+29/04/2025, 21:39 - Kunal Khadgi: currently only this data is stored in db
+29/04/2025, 21:39 - Kunal Khadgi: currently only this data is stored in db
+29/04/2025, 21:39 - Kunal Khadgi: have u logged in ultramsg and setup the webhook url?
+29/04/2025, 21:40 - Kunal Khadgi: yes it will get linked ...
+29/04/2025, 21:40 - Kunal Khadgi: yes it will get linked ...
+29/04/2025, 21:40 - Kunal Khadgi: .
+29/04/2025, 21:40 - Kunal Khadgi: .
+29/04/2025, 21:40 - Kunal Khadgi: for WhatsApp msgs from ur chat 
+u need to log in to ultramsg
+set the webhook url and then send a few msgs 
+
+then test it ...
+29/04/2025, 21:41 - Kunal Khadgi: for WhatsApp msgs from ur chat 
+u need to log in to ultramsg
+set the webhook url and then send a few msgs 
+
+then test it ...
+29/04/2025, 21:41 - Kunal Khadgi: yes it will get linked ...
+29/04/2025, 21:41 - Kunal Khadgi: .
+29/04/2025, 21:43 - Kunal Khadgi: before logging out scrol a bit down and
+copy the existing url
+29/04/2025, 21:43 - Kunal Khadgi: before logging out scrol a bit down and
+copy the existing url
+29/04/2025, 21:44 - Kunal Khadgi: logout > login using ur number > paste existing url
+29/04/2025, 21:44 - Kunal Khadgi: logout > login using ur number > paste existing url
+29/04/2025, 21:57 - Kunal Khadgi: hi
+29/04/2025, 21:57 - Kunal Khadgi: hello
+29/04/2025, 21:57 - Kunal Khadgi: how are you
+29/04/2025, 22:03 - Kunal Khadgi: u want txt or files ??
+29/04/2025, 22:03 - Kunal Khadgi: u want txt or files ??
+29/04/2025, 22:04 - Kunal Khadgi: # unified_app.py (FAST version)
+"""
+Unified WhatsApp Automation Application v2 - Multithreaded Embedding
+- ZIP watcher
+- Chat parsing
+- Immediate storage: SQLite + FAISS
+- Scheduled summarization & backups
+- Multithreaded embeddings for faster performance
+"""
+import os
+import json
+import sqlite3
+import re
+import logging
+import shutil
+from pathlib import Path
+from datetime import datetime
+import pytz
+import numpy as np
+import faiss
+import openai
+from google import genai
+from flask import Flask, request, jsonify, Blueprint, abort
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+from summarizer import job_summarize
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.cloud import storage
+import http.client
+
+# app-specific settings
+from config import settings
+from parser import parse_whatsapp, ZipHandler, append_to_txt, bootstrap_conversation
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(settings.log_file), logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Initialize GCS client
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+# Backup helper
+def backup_local_files():
+    try:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = settings.base_dir / 'backups'
+        backup_dir.mkdir(exist_ok=True)
+        shutil.copy2(DB_PATH, backup_dir / f"messages_{ts}.db")
+        shutil.copy2(INDEX_PATH, backup_dir / f"whatsapp_index_{ts}.index")
+        shutil.copy2(METAS_PATH, backup_dir / f"whatsapp_metas_{ts}.npy")
+        upload_file(str(backup_dir / f"messages_{ts}.db"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_index_{ts}.index"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_metas_{ts}.npy"), "backups")
+        logger.info("Backup created.")
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+
+# Database setup
+DB_PATH = settings.base_dir / 'messages.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute(
+        '''CREATE TABLE IF NOT EXISTS messages(
+               phone TEXT,
+               timestamp TEXT,
+               sender TEXT,
+               message TEXT,
+               UNIQUE(phone, timestamp, sender, message)
+           )'''
+    )
+    conn.commit()
+    conn.close()
+
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
+
+init_db()
+
+# FAISS + OpenAI setup
+TZ = pytz.timezone(settings.timezone)
+EMBED_MODEL = "text-embedding-3-small"
+DIM = 1536
+
+faiss_dir = settings.base_dir / 'faiss_db'
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / 'whatsapp.index'
+METAS_PATH = faiss_dir / 'whatsapp_metas.npy'
+
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH), faiss.IO_FLAG_MMAP)
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexHNSWFlat(DIM, 32)
+    metas = []
+
+if len(metas) > 50000:
+    metas = metas[-50000:]
+
+openai.api_key = settings.openai_api_key
+gen_client = genai.Client(api_key=settings.gemini_api_key)
+
+# Multithread pool
+executor = ThreadPoolExecutor(max_workers=10)
+futures = {}
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def _embed(texts: list[str]) -> np.ndarray:
+    resp = openai.Embedding.create(
+        model=EMBED_MODEL,
+        input=texts
+    )
+    vecs = np.array([d['embedding'] for d in resp['data']], dtype='float32')
+    faiss.normalize_L2(vecs)
+    return vecs
+
+# WhatsApp sending
+def _send_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection('api.ultramsg.com')
+        payload = json.dumps({
+            'token': settings.token,
+            'to': to,
+            'body': text
+        })
+        headers = {'Content-Type': 'application/json'}
+        conn.request('POST', f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp: {e}")
+
+# Fast store_message
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def store_message(phone: str, sender: str, message: str, ts: str):
+    uid = f"{phone}|{ts}|{sender}"
+
+    if any(m['uid'] == uid and m['message'] == message for m in metas):
+        logger.info(f"Duplicate skipped {uid}")
+        return
+
+    try:
+        conn = get_db_conn()
+        conn.execute(
+            'INSERT OR IGNORE INTO messages(phone, timestamp, sender, message) VALUES (?, ?, ?, ?)',
+            (phone, ts, sender, message)
+        )
+        conn.commit()
+        conn.close()
+        print("stored msg to ")
+    except Exception as e:
+        logger.error(f"SQLite error: {e}")
+        return
+
+    # Async embed
+    future = executor.submit(_embed, [message])
+    futures[future] = (uid, phone, sender, ts, message)
+
+def finish_embeddings():
+    for future in as_completed(futures):
+        try:
+            emb = future.result(timeout=30)
+            uid, phone, sender, ts, message = futures[future]
+
+            index.add(emb)
+            metas.append({'uid': uid, 'phone': phone, 'sender': sender, 'timestamp': ts, 'message': message})
+
+        except Exception as e:
+            logger.error(f"Embedding add fail: {e}")
+
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+    logger.info("Saved FAISS & metas.")
+
+# Retrieve semantic context via FAISS
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    try:
+        q_emb = _embed([query])
+    except Exception:
+        return ''
+    distances, indices = index.search(q_emb, top_k)
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(metas):
+            continue
+        m = metas[idx]
+        lines.append(f"{m['timestamp']} | {m['sender']} (Chat {m['phone']}): {m['message']}")
+    return '\n'.join(lines)
+
+# NL→SQL conversion and execution
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def nl_to_sql(nl_query: str) -> str:
+    ctx = retrieve_context(nl_query, 5) or '<no context>'
+    prompt = f"""
+You output one valid SQLite query for messages(phone, timestamp, sender, message).
+Context:
+{ctx}
+
+User: \"{nl_query}\"
+SQL:
+"""
+    resp = gen_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt
+    )
+    raw = resp.text.strip()
+    sql = re.sub(r'^```.*?\n', '', raw)
+    sql = re.sub(r'\n```$', '', sql)
+    return sql
+
+def run_query(nl_query: str) -> str:
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in (cur.description or [])]
+        if not rows:
+            return 'No results.'
+        hdr = ' | '.join(cols)
+        sep = '-' * len(hdr)
+        lines = [hdr, sep] + [' | '.join(str(v) for v in r) for r in rows]
+        return '\n'.join(lines)
+    except sqlite3.OperationalError as oe:
+        return f"SQL error: {oe}"
+    except Exception as e:
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+# Flask application setup
+def require_api(f):
+    def wrapped(*args, **kwargs):
+        key = request.headers.get('X-API-KEY')
+        logger.info(f"Received X-API-KEY: {key}")
+        if key != settings.custom_gpt_api_key:
+            abort(401)
+        return f(*args, **kwargs)
+    wrapped.__name__ = f.__name__
+    return wrapped
+
+app = Flask(__name__)
+webhook_bp = Blueprint('webhook', __name__)
+
+@webhook_bp.route('/webhook', methods=['POST'])
+def whatsapp_webhook():
+    d = request.json.get('data', {})
+    fm = d.get('fromMe', False)
+    body = d.get('body', '').strip()
+    fr = d.get('from', '')
+    # handle /query command
+    if fm and body.lower().startswith('/query '):
+        nl = body[len('/query '):].strip()
+        reply = run_query(nl)
+        _send_message(fr, reply)
+        return 'queried', 200
+    # ignore non-chat, group, newsletter, or empty
+    if d.get('type') != 'chat' or d.get('type') == 'newsletter' or '@g.us' in fr or not body:
+        return 'ignored', 200
+    # incoming chat
+    phone = fr.replace('@c.us', '')
+    sender = d.get('pushname') or phone
+    bootstrap_conversation(phone, sender)
+    ts = datetime.now(TZ).isoformat()
+    append_to_txt(phone, sender, body)
+    store_message(phone, sender, body, ts)
+    return 'ok', 200
+
+@webhook_bp.route('/query', methods=['POST'])
+def api_query():
+    data = request.json or {}
+    q = data.get('query', '')
+    ans = run_query(q)
+    return jsonify({'answer': ans})
+
+@webhook_bp.route('/search', methods=['POST'])
+def semantic_search():
+    """
+    Semantic search endpoint for Custom GPT
+    Input: { "query": "your question" }
+    Output: { "context": "matching chat messages" }
+    """
+    try:
+        data = request.json or {}
+        query = data.get('query', '').strip()
+        if not query:
+            return jsonify({"error": "Query cannot be empty"}), 400
+
+        # Use existing retrieve_context function
+        context = retrieve_context(query, top_k=5)
+
+        if not context:
+            return jsonify({"context": "No relevant chats found."})
+        
+        return jsonify({"context": context})
+    except Exception as e:
+        logger.error(f"Semantic search error: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+app.register_blueprint(webhook_bp)
+
+# Scheduler jobs
+scheduler = BackgroundScheduler(timezone=TZ)
+scheduler.add_job(backup_local_files, CronTrigger.from_crontab("0 */6 * * *"), id='backup')
+scheduler.add_job(job_summarize, CronTrigger.from_crontab(settings.cron_expression), id='summaries')
+scheduler.start()
+
+observer = Observer()
+observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+observer.start()
+
+if __name__ == '__main__':
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+    for d in settings.processed_dir.iterdir():
+        if not d.is_dir(): continue
+        txt = d / f"{d.name}.txt"
+        if not txt.exists(): continue
+        msgs = parse_whatsapp(str(txt))
+        for m in msgs:
+            store_message(d.name, m['sender'], m['message'], m['timestamp'])
+    finish_embeddings()
+    logger.info('Started unified_app v2 - Fast Mode')
+    app.run(host='0.0.0.0', port=settings.port, debug=False, use_reloader=False)
+    observer.stop()
+    observer.join()
+
+# config.py
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    base_dir: Path = Path(__file__).parent
+    exported_dir: Path = base_dir / "exported_data"
+    processed_dir: Path = base_dir / "processed_exported_data"
+    summaries_csv: Path  = base_dir / "chat_summaries.csv"
+    state_file: Path     = base_dir / "state.json"
+    log_file: Path       = base_dir / "pipeline.log"
+    gcp_key_file: Path   = base_dir / "generated-key.json"
+
+    # environment variables
+    gcp_bucket: str                   = "mosaic_wellness_whatsapp_bucket"
+    instance_id: str                  = "115449"
+    token: str                        = "ctc8smu872u1rez4"
+    gemini_api_key: str               = "AIzaSyAVD4dg6v10sWgbqfo2CqZpWcoHo5VUEvY"
+    gemini_model: str                 = "gemini-2.0-flash"
+    gemini_embedding_model: str       = "gemini-embedding-exp-03-07"
+    openai_api_key: str               = "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"
+    custom_gpt_api_key: str           = "laodtgvsghnxerpkatbdhrsgksliwwgdxwbjrtvrfzxnvddplsseklalrreirlmcalwoipxwlxsanvpkwctxurqiyspzwpbaejoabigpduibfqjlgoiyicwlokgbhnkv"
+    # other settings
+    timezone: str                     = "Asia/Kolkata"
+    cron_expression: str              = "0 */6 * * *"
+    port: int                         = 5000
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
+
+settings = Settings()
+
+# logger.py
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from config import settings
+
+def init_logger():
+    logger = logging.getLogger("whatsapp_bot")
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler(
+        settings.log_file, when="midnight", backupCount=7, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+logger = init_logger()
+
+# webhook.py
+from flask import request, Blueprint
+from parser import append_to_txt, bootstrap_conversation
+from query_engine import run_query
+from config import settings
+import json
+import http.client
+from logger import logger
+from datetime import datetime
+import pytz
+
+webhook_bp = Blueprint("webhook", __name__)
+_last_out = {}
+# load state
+if settings.state_file.exists():
+    _state = json.loads(settings.state_file.read_text(encoding="utf-8"))
+    _last_out = _state.get("last_outgoing", {})
+else:
+    _state = {"last_outgoing": {}}
+
+def send_whatsapp_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection("api.ultramsg.com")
+        payload = json.dumps({
+            "token": settings.token,
+            "to": f"{to}@c.us",
+            "body": text
+        })
+        headers = {"Content-Type": "application/json"}
+        conn.request("POST", f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent message to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+
+@webhook_bp.route("/webhook", methods=["POST"])
+def whatsapp_webhook():
+    d = request.json.get("data", {})
+    typ = d.get("type")
+    fr = d.get("from", "")
+    fm = d.get("fromMe", False)
+    body = (d.get("body") or "").strip()
+
+    if fm and body.lower().startswith("/query "):
+        nl = body[len("/query "):].strip()
+        reply = run_query(nl)
+        send_whatsapp_message(fr.replace("@c.us", ""), reply)
+        return "queried", 200
+
+    if typ != "chat" or "@g.us" in fr or not body:
+        return "ignored", 200
+
+    if not fm:
+        phone = fr.replace("@c.us", "")
+        name = d.get("pushname") or phone
+        bootstrap_conversation(phone, name)
+        sender = name
+    else:
+        phone = d.get("to", "").replace("@c.us", "")
+        ts = datetime.now(pytz.timezone(settings.timezone)).strftime("%d/%m/%Y, %H:%M")
+        line = f"{ts} - You: {body}"
+        if _last_out.get(phone) == line:
+            return "dup", 200
+        _last_out[phone] = line
+        _state["last_outgoing"] = _last_out
+        settings.state_file.write_text(json.dumps(_state), encoding="utf-8")
+        sender = "You"
+
+    append_to_txt(phone, sender, body)
+    return "ok", 200
+
+@webhook_bp.route("/nl_query", methods=["POST"])
+def nl_query():
+    text = request.json.get("query","")
+    return run_query(text), 200
+
+@webhook_bp.route("/", methods=["GET"])
+def index():
+    return "Live", 200
+
+def register_routes(app):
+    app.register_blueprint(webhook_bp)
+
+
+# scheduler.py
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+from memory import ingest_whatsapp_chats
+from config import settings
+from summarizer import job_summarize
+from logger import logger
+
+def start_scheduler() -> BackgroundScheduler:
+    tz = pytz.timezone(settings.timezone)
+    sched = BackgroundScheduler(timezone=tz)
+    sched.add_job(
+        job_summarize,
+        trigger=CronTrigger.from_crontab(settings.cron_expression),
+        id="job_summarize"
+    )
+    sched.add_job(
+    ingest_whatsapp_chats,
+    trigger=CronTrigger(hour="1", minute=0),  # once a day at 1:00 AM
+    id="daily_memory_ingest"
+    )
+    sched.start()
+    logger.info("Scheduler started.")
+    return sched
+
+# memory.py
+"""
+RAG Memory Layer: Ingest WhatsApp chats into a FAISS vector store
+and provide a retrieval function — using Google Gemini for embeddings.
+"""
+import os
+from pathlib import Path
+import numpy as np
+import faiss
+from google import genai
+from google.genai.types import EmbedContentConfig
+from config import settings
+from parser import parse_whatsapp
+
+# 1. Configure your Gemini client
+#    Make sure settings.gemini_api_key is set to your Google API key.
+client = genai.Client(api_key=settings.gemini_api_key)
+
+# 2. Prepare persistence directory & file paths
+faiss_dir = settings.base_dir / "faiss_db"
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / "whatsapp.index"
+METAS_PATH  = faiss_dir / "whatsapp_metas.npy"
+
+# 3. Embedding model & dimension
+EMBED_MODEL = getattr(settings, "gemini_embedding_model", "text-embedding-004")
+DIM         = 768  # or 3072 if you choose the large model
+
+# 4. Initialize (or load) FAISS index & metadata list
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH))
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexFlatIP(DIM)  # IP on normalized vectors = cosine
+    metas = []  # will hold dicts: uid, phone, sender, timestamp, message
+
+
+def _embed(texts: list[str]) -> np.ndarray:
+    """
+    Use Gemini to embed a list of texts and L2-normalize them.
+    """
+    response = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=texts,
+        config=EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=DIM
+        ),
+    )
+    # extract the embedding values
+    vecs = np.array(
+        [emb.values for emb in response.embeddings],
+        dtype="float32"
+    )
+    faiss.normalize_L2(vecs)
+    return vecs
+
+
+def ingest_whatsapp_chats():
+    """
+    Walk through processed_exported_data/, parse each chat file, and upsert embeddings.
+    Skips messages already present (by unique uid).
+    """
+    seen_uids = {m["uid"] for m in metas}
+
+    for phone_dir in settings.processed_dir.iterdir():
+        if not phone_dir.is_dir():
+            continue
+        txt_file = phone_dir / f"{phone_dir.name}.txt"
+        if not txt_file.exists():
+            continue
+
+        msgs = parse_whatsapp(str(txt_file))
+        for m in msgs:
+            uid = f"{phone_dir.name}|{m['timestamp']}|{m['sender']}"
+            if uid in seen_uids:
+                continue
+
+            # embed & add to index
+            emb = _embed([m["message"]])
+            index.add(emb)
+
+            # record metadata
+            metas.append({
+                "uid":       uid,
+                "phone":     phone_dir.name,
+                "sender":    m["sender"],
+                "timestamp": m["timestamp"],
+                "message":   m["message"]
+            })
+            seen_uids.add(uid)
+
+    # persist to disk
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+
+
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    """
+    Given a natural-language query, return the top_k most relevant chat excerpts as a text block.
+    """
+    q_emb = _embed([query])
+    distances, indices = index.search(q_emb, top_k)
+
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        # only accept valid, non-negative indices
+        if idx < 0 or idx >= len(metas):
+            continue
+
+        meta = metas[idx]
+        lines.append(
+            f"{meta['timestamp']} | {meta['sender']} "
+            f"(Chat {meta['phone']}): {meta['message']}"
+        )
+
+    return "\n".join(lines)
+29/04/2025, 22:04 - Kunal Khadgi: # unified_app.py (FAST version)
+"""
+Unified WhatsApp Automation Application v2 - Multithreaded Embedding
+- ZIP watcher
+- Chat parsing
+- Immediate storage: SQLite + FAISS
+- Scheduled summarization & backups
+- Multithreaded embeddings for faster performance
+"""
+import os
+import json
+import sqlite3
+import re
+import logging
+import shutil
+from pathlib import Path
+from datetime import datetime
+import pytz
+import numpy as np
+import faiss
+import openai
+from google import genai
+from flask import Flask, request, jsonify, Blueprint, abort
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+from summarizer import job_summarize
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.cloud import storage
+import http.client
+
+# app-specific settings
+from config import settings
+from parser import parse_whatsapp, ZipHandler, append_to_txt, bootstrap_conversation
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(settings.log_file), logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Initialize GCS client
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+# Backup helper
+def backup_local_files():
+    try:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = settings.base_dir / 'backups'
+        backup_dir.mkdir(exist_ok=True)
+        shutil.copy2(DB_PATH, backup_dir / f"messages_{ts}.db")
+        shutil.copy2(INDEX_PATH, backup_dir / f"whatsapp_index_{ts}.index")
+        shutil.copy2(METAS_PATH, backup_dir / f"whatsapp_metas_{ts}.npy")
+        upload_file(str(backup_dir / f"messages_{ts}.db"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_index_{ts}.index"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_metas_{ts}.npy"), "backups")
+        logger.info("Backup created.")
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+
+# Database setup
+DB_PATH = settings.base_dir / 'messages.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute(
+        '''CREATE TABLE IF NOT EXISTS messages(
+               phone TEXT,
+               timestamp TEXT,
+               sender TEXT,
+               message TEXT,
+               UNIQUE(phone, timestamp, sender, message)
+           )'''
+    )
+    conn.commit()
+    conn.close()
+
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
+
+init_db()
+
+# FAISS + OpenAI setup
+TZ = pytz.timezone(settings.timezone)
+EMBED_MODEL = "text-embedding-3-small"
+DIM = 1536
+
+faiss_dir = settings.base_dir / 'faiss_db'
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / 'whatsapp.index'
+METAS_PATH = faiss_dir / 'whatsapp_metas.npy'
+
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH), faiss.IO_FLAG_MMAP)
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexHNSWFlat(DIM, 32)
+    metas = []
+
+if len(metas) > 50000:
+    metas = metas[-50000:]
+
+openai.api_key = settings.openai_api_key
+gen_client = genai.Client(api_key=settings.gemini_api_key)
+
+# Multithread pool
+executor = ThreadPoolExecutor(max_workers=10)
+futures = {}
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def _embed(texts: list[str]) -> np.ndarray:
+    resp = openai.Embedding.create(
+        model=EMBED_MODEL,
+        input=texts
+    )
+    vecs = np.array([d['embedding'] for d in resp['data']], dtype='float32')
+    faiss.normalize_L2(vecs)
+    return vecs
+
+# WhatsApp sending
+def _send_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection('api.ultramsg.com')
+        payload = json.dumps({
+            'token': settings.token,
+            'to': to,
+            'body': text
+        })
+        headers = {'Content-Type': 'application/json'}
+        conn.request('POST', f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp: {e}")
+
+# Fast store_message
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def store_message(phone: str, sender: str, message: str, ts: str):
+    uid = f"{phone}|{ts}|{sender}"
+
+    if any(m['uid'] == uid and m['message'] == message for m in metas):
+        logger.info(f"Duplicate skipped {uid}")
+        return
+
+    try:
+        conn = get_db_conn()
+        conn.execute(
+            'INSERT OR IGNORE INTO messages(phone, timestamp, sender, message) VALUES (?, ?, ?, ?)',
+            (phone, ts, sender, message)
+        )
+        conn.commit()
+        conn.close()
+        print("stored msg to ")
+    except Exception as e:
+        logger.error(f"SQLite error: {e}")
+        return
+
+    # Async embed
+    future = executor.submit(_embed, [message])
+    futures[future] = (uid, phone, sender, ts, message)
+
+def finish_embeddings():
+    for future in as_completed(futures):
+        try:
+            emb = future.result(timeout=30)
+            uid, phone, sender, ts, message = futures[future]
+
+            index.add(emb)
+            metas.append({'uid': uid, 'phone': phone, 'sender': sender, 'timestamp': ts, 'message': message})
+
+        except Exception as e:
+            logger.error(f"Embedding add fail: {e}")
+
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+    logger.info("Saved FAISS & metas.")
+
+# Retrieve semantic context via FAISS
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    try:
+        q_emb = _embed([query])
+    except Exception:
+        return ''
+    distances, indices = index.search(q_emb, top_k)
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(metas):
+            continue
+        m = metas[idx]
+        lines.append(f"{m['timestamp']} | {m['sender']} (Chat {m['phone']}): {m['message']}")
+    return '\n'.join(lines)
+
+# NL→SQL conversion and execution
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def nl_to_sql(nl_query: str) -> str:
+    ctx = retrieve_context(nl_query, 5) or '<no context>'
+    prompt = f"""
+You output one valid SQLite query for messages(phone, timestamp, sender, message).
+Context:
+{ctx}
+
+User: \"{nl_query}\"
+SQL:
+"""
+    resp = gen_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt
+    )
+    raw = resp.text.strip()
+    sql = re.sub(r'^```.*?\n', '', raw)
+    sql = re.sub(r'\n```$', '', sql)
+    return sql
+
+def run_query(nl_query: str) -> str:
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in (cur.description or [])]
+        if not rows:
+            return 'No results.'
+        hdr = ' | '.join(cols)
+        sep = '-' * len(hdr)
+        lines = [hdr, sep] + [' | '.join(str(v) for v in r) for r in rows]
+        return '\n'.join(lines)
+    except sqlite3.OperationalError as oe:
+        return f"SQL error: {oe}"
+    except Exception as e:
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+# Flask application setup
+def require_api(f):
+    def wrapped(*args, **kwargs):
+        key = request.headers.get('X-API-KEY')
+        logger.info(f"Received X-API-KEY: {key}")
+        if key != settings.custom_gpt_api_key:
+            abort(401)
+        return f(*args, **kwargs)
+    wrapped.__name__ = f.__name__
+    return wrapped
+
+app = Flask(__name__)
+webhook_bp = Blueprint('webhook', __name__)
+
+@webhook_bp.route('/webhook', methods=['POST'])
+def whatsapp_webhook():
+    d = request.json.get('data', {})
+    fm = d.get('fromMe', False)
+    body = d.get('body', '').strip()
+    fr = d.get('from', '')
+    # handle /query command
+    if fm and body.lower().startswith('/query '):
+        nl = body[len('/query '):].strip()
+        reply = run_query(nl)
+        _send_message(fr, reply)
+        return 'queried', 200
+    # ignore non-chat, group, newsletter, or empty
+    if d.get('type') != 'chat' or d.get('type') == 'newsletter' or '@g.us' in fr or not body:
+        return 'ignored', 200
+    # incoming chat
+    phone = fr.replace('@c.us', '')
+    sender = d.get('pushname') or phone
+    bootstrap_conversation(phone, sender)
+    ts = datetime.now(TZ).isoformat()
+    append_to_txt(phone, sender, body)
+    store_message(phone, sender, body, ts)
+    return 'ok', 200
+
+@webhook_bp.route('/query', methods=['POST'])
+def api_query():
+    data = request.json or {}
+    q = data.get('query', '')
+    ans = run_query(q)
+    return jsonify({'answer': ans})
+
+@webhook_bp.route('/search', methods=['POST'])
+def semantic_search():
+    """
+    Semantic search endpoint for Custom GPT
+    Input: { "query": "your question" }
+    Output: { "context": "matching chat messages" }
+    """
+    try:
+        data = request.json or {}
+        query = data.get('query', '').strip()
+        if not query:
+            return jsonify({"error": "Query cannot be empty"}), 400
+
+        # Use existing retrieve_context function
+        context = retrieve_context(query, top_k=5)
+
+        if not context:
+            return jsonify({"context": "No relevant chats found."})
+        
+        return jsonify({"context": context})
+    except Exception as e:
+        logger.error(f"Semantic search error: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+app.register_blueprint(webhook_bp)
+
+# Scheduler jobs
+scheduler = BackgroundScheduler(timezone=TZ)
+scheduler.add_job(backup_local_files, CronTrigger.from_crontab("0 */6 * * *"), id='backup')
+scheduler.add_job(job_summarize, CronTrigger.from_crontab(settings.cron_expression), id='summaries')
+scheduler.start()
+
+observer = Observer()
+observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+observer.start()
+
+if __name__ == '__main__':
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+    for d in settings.processed_dir.iterdir():
+        if not d.is_dir(): continue
+        txt = d / f"{d.name}.txt"
+        if not txt.exists(): continue
+        msgs = parse_whatsapp(str(txt))
+        for m in msgs:
+            store_message(d.name, m['sender'], m['message'], m['timestamp'])
+    finish_embeddings()
+    logger.info('Started unified_app v2 - Fast Mode')
+    app.run(host='0.0.0.0', port=settings.port, debug=False, use_reloader=False)
+    observer.stop()
+    observer.join()
+
+# config.py
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    base_dir: Path = Path(__file__).parent
+    exported_dir: Path = base_dir / "exported_data"
+    processed_dir: Path = base_dir / "processed_exported_data"
+    summaries_csv: Path  = base_dir / "chat_summaries.csv"
+    state_file: Path     = base_dir / "state.json"
+    log_file: Path       = base_dir / "pipeline.log"
+    gcp_key_file: Path   = base_dir / "generated-key.json"
+
+    # environment variables
+    gcp_bucket: str                   = "mosaic_wellness_whatsapp_bucket"
+    instance_id: str                  = "115449"
+    token: str                        = "ctc8smu872u1rez4"
+    gemini_api_key: str               = "AIzaSyAVD4dg6v10sWgbqfo2CqZpWcoHo5VUEvY"
+    gemini_model: str                 = "gemini-2.0-flash"
+    gemini_embedding_model: str       = "gemini-embedding-exp-03-07"
+    openai_api_key: str               = "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"
+    custom_gpt_api_key: str           = "laodtgvsghnxerpkatbdhrsgksliwwgdxwbjrtvrfzxnvddplsseklalrreirlmcalwoipxwlxsanvpkwctxurqiyspzwpbaejoabigpduibfqjlgoiyicwlokgbhnkv"
+    # other settings
+    timezone: str                     = "Asia/Kolkata"
+    cron_expression: str              = "0 */6 * * *"
+    port: int                         = 5000
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
+
+settings = Settings()
+
+# logger.py
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from config import settings
+
+def init_logger():
+    logger = logging.getLogger("whatsapp_bot")
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler(
+        settings.log_file, when="midnight", backupCount=7, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+logger = init_logger()
+
+# webhook.py
+from flask import request, Blueprint
+from parser import append_to_txt, bootstrap_conversation
+from query_engine import run_query
+from config import settings
+import json
+import http.client
+from logger import logger
+from datetime import datetime
+import pytz
+
+webhook_bp = Blueprint("webhook", __name__)
+_last_out = {}
+# load state
+if settings.state_file.exists():
+    _state = json.loads(settings.state_file.read_text(encoding="utf-8"))
+    _last_out = _state.get("last_outgoing", {})
+else:
+    _state = {"last_outgoing": {}}
+
+def send_whatsapp_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection("api.ultramsg.com")
+        payload = json.dumps({
+            "token": settings.token,
+            "to": f"{to}@c.us",
+            "body": text
+        })
+        headers = {"Content-Type": "application/json"}
+        conn.request("POST", f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent message to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+
+@webhook_bp.route("/webhook", methods=["POST"])
+def whatsapp_webhook():
+    d = request.json.get("data", {})
+    typ = d.get("type")
+    fr = d.get("from", "")
+    fm = d.get("fromMe", False)
+    body = (d.get("body") or "").strip()
+
+    if fm and body.lower().startswith("/query "):
+        nl = body[len("/query "):].strip()
+        reply = run_query(nl)
+        send_whatsapp_message(fr.replace("@c.us", ""), reply)
+        return "queried", 200
+
+    if typ != "chat" or "@g.us" in fr or not body:
+        return "ignored", 200
+
+    if not fm:
+        phone = fr.replace("@c.us", "")
+        name = d.get("pushname") or phone
+        bootstrap_conversation(phone, name)
+        sender = name
+    else:
+        phone = d.get("to", "").replace("@c.us", "")
+        ts = datetime.now(pytz.timezone(settings.timezone)).strftime("%d/%m/%Y, %H:%M")
+        line = f"{ts} - You: {body}"
+        if _last_out.get(phone) == line:
+            return "dup", 200
+        _last_out[phone] = line
+        _state["last_outgoing"] = _last_out
+        settings.state_file.write_text(json.dumps(_state), encoding="utf-8")
+        sender = "You"
+
+    append_to_txt(phone, sender, body)
+    return "ok", 200
+
+@webhook_bp.route("/nl_query", methods=["POST"])
+def nl_query():
+    text = request.json.get("query","")
+    return run_query(text), 200
+
+@webhook_bp.route("/", methods=["GET"])
+def index():
+    return "Live", 200
+
+def register_routes(app):
+    app.register_blueprint(webhook_bp)
+
+
+# scheduler.py
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+from memory import ingest_whatsapp_chats
+from config import settings
+from summarizer import job_summarize
+from logger import logger
+
+def start_scheduler() -> BackgroundScheduler:
+    tz = pytz.timezone(settings.timezone)
+    sched = BackgroundScheduler(timezone=tz)
+    sched.add_job(
+        job_summarize,
+        trigger=CronTrigger.from_crontab(settings.cron_expression),
+        id="job_summarize"
+    )
+    sched.add_job(
+    ingest_whatsapp_chats,
+    trigger=CronTrigger(hour="1", minute=0),  # once a day at 1:00 AM
+    id="daily_memory_ingest"
+    )
+    sched.start()
+    logger.info("Scheduler started.")
+    return sched
+
+# memory.py
+"""
+RAG Memory Layer: Ingest WhatsApp chats into a FAISS vector store
+and provide a retrieval function — using Google Gemini for embeddings.
+"""
+import os
+from pathlib import Path
+import numpy as np
+import faiss
+from google import genai
+from google.genai.types import EmbedContentConfig
+from config import settings
+from parser import parse_whatsapp
+
+# 1. Configure your Gemini client
+#    Make sure settings.gemini_api_key is set to your Google API key.
+client = genai.Client(api_key=settings.gemini_api_key)
+
+# 2. Prepare persistence directory & file paths
+faiss_dir = settings.base_dir / "faiss_db"
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / "whatsapp.index"
+METAS_PATH  = faiss_dir / "whatsapp_metas.npy"
+
+# 3. Embedding model & dimension
+EMBED_MODEL = getattr(settings, "gemini_embedding_model", "text-embedding-004")
+DIM         = 768  # or 3072 if you choose the large model
+
+# 4. Initialize (or load) FAISS index & metadata list
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH))
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexFlatIP(DIM)  # IP on normalized vectors = cosine
+    metas = []  # will hold dicts: uid, phone, sender, timestamp, message
+
+
+def _embed(texts: list[str]) -> np.ndarray:
+    """
+    Use Gemini to embed a list of texts and L2-normalize them.
+    """
+    response = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=texts,
+        config=EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=DIM
+        ),
+    )
+    # extract the embedding values
+    vecs = np.array(
+        [emb.values for emb in response.embeddings],
+        dtype="float32"
+    )
+    faiss.normalize_L2(vecs)
+    return vecs
+
+
+def ingest_whatsapp_chats():
+    """
+    Walk through processed_exported_data/, parse each chat file, and upsert embeddings.
+    Skips messages already present (by unique uid).
+    """
+    seen_uids = {m["uid"] for m in metas}
+
+    for phone_dir in settings.processed_dir.iterdir():
+        if not phone_dir.is_dir():
+            continue
+        txt_file = phone_dir / f"{phone_dir.name}.txt"
+        if not txt_file.exists():
+            continue
+
+        msgs = parse_whatsapp(str(txt_file))
+        for m in msgs:
+            uid = f"{phone_dir.name}|{m['timestamp']}|{m['sender']}"
+            if uid in seen_uids:
+                continue
+
+            # embed & add to index
+            emb = _embed([m["message"]])
+            index.add(emb)
+
+            # record metadata
+            metas.append({
+                "uid":       uid,
+                "phone":     phone_dir.name,
+                "sender":    m["sender"],
+                "timestamp": m["timestamp"],
+                "message":   m["message"]
+            })
+            seen_uids.add(uid)
+
+    # persist to disk
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+
+
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    """
+    Given a natural-language query, return the top_k most relevant chat excerpts as a text block.
+    """
+    q_emb = _embed([query])
+    distances, indices = index.search(q_emb, top_k)
+
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        # only accept valid, non-negative indices
+        if idx < 0 or idx >= len(metas):
+            continue
+
+        meta = metas[idx]
+        lines.append(
+            f"{meta['timestamp']} | {meta['sender']} "
+            f"(Chat {meta['phone']}): {meta['message']}"
+        )
+
+    return "\n".join(lines)
+29/04/2025, 22:05 - Kunal Khadgi: # query_engine.py
+"""
+NL → SQL module with RAG context and error handling.
+"""
+import sqlite3
+import re
+import logging
+from pathlib import Path
+from config import settings
+from memory import retrieve_context
+from google import genai
+
+# set up logging
+logger = logging.getLogger("query_engine")
+logger.setLevel(logging.INFO)
+
+# Path to persistent SQLite DB
+DB_PATH = Path(__file__).parent / "messages.db"
+
+# Initialize database if needed
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            phone TEXT,
+            timestamp TEXT,
+            sender TEXT,
+            message TEXT
+        )
+    """.strip())
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Helper to get a DB connection
+def get_db_conn():
+    return sqlite3.connect(DB_PATH)
+
+
+def nl_to_sql(nl_query: str) -> str:
+    """
+    Converts a natural language question into a single valid SQLite query,
+    augmented by relevant past chat context.
+    """
+    # 1) Retrieve top-5 relevant chat snippets
+    context = retrieve_context(nl_query, top_k=5)
+    if not context.strip():
+        context = "<no relevant past chat found>"
+    
+    # 2) Build prompt with schema, context, example, and user question
+    prompt = f"""
+You are an assistant that outputs exactly one valid SQLite query (no code fences)
+for this schema:
+  messages(phone, timestamp, sender, message)
+
+Here are the most relevant past chat lines:
+{context}
+
+### Example
+User question: "Who sent the most messages in the last 7 days?"
+SQL:
+  SELECT sender, COUNT(*) AS cnt
+    FROM messages
+   WHERE timestamp >= datetime('now','-7 days')
+   GROUP BY sender
+   ORDER BY cnt DESC
+   LIMIT 5;
+
+### Now your turn
+User question: "{nl_query}"
+SQL:
+"""
+    try:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        resp = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+        )
+        raw_sql = resp.text.strip()
+        # fallback strip code fences if any
+        sql = re.sub(r"^```[a-zA-Z]*\n", "", raw_sql)
+        sql = re.sub(r"\n```$", "", sql)
+        return sql
+    except Exception as e:
+        logger.error(f"NL→SQL generation error: {e}")
+        raise
+
+
+def run_query(nl_query: str) -> str:
+    """
+    Executes the SQL generated from nl_query and returns a text table or error message.
+    """
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL query: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if rows else []
+        if not rows:
+            return "No results found for your query."
+        # Format table
+        header = " | ".join(cols)
+        sep = "-" * len(header)
+        lines = [header, sep]
+        for r in rows:
+            lines.append(" | ".join(str(v) for v in r))
+        return "\n".join(lines)
+    except sqlite3.OperationalError as oe:
+        logger.error(f"SQL execution error: {oe}")
+        return f"SQL error: {oe}"  
+    except Exception as e:
+        logger.error(f"Unexpected error in run_query: {e}")
+        return f"Error processing query: {e}"
+    finally:
+        conn.close()
+
+
+# summarizer.py
+import csv
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import pytz
+from google import genai
+from config import settings
+from parser import parse_whatsapp
+from storage import upload_file
+from logger import logger
+
+# Initialize Gemini client for summarization
+genai_client = genai.Client(api_key=settings.gemini_api_key)
+
+
+def summarize_messages(msgs: list) -> str:
+    """
+    Summarize the last 100 messages in a chat using Gemini.
+    Returns the summary text.
+    """
+    excerpt = msgs[-100:]
+    prompt = (
+        "You are a marketing assistant. Summarize key points & tone:\n\n"
+        + "\n".join(f"{m['timestamp']} | {m['sender']}: {m['message']}" for m in excerpt)
+        + "\n\nSummary:"
+    )
+    resp = genai_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+    )
+    return resp.text.strip()
+
+
+def append_summary(run_ts: datetime, phone: str, summary: str):
+    """
+    Append a summary entry to the summaries CSV file.
+    """
+    first = not settings.summaries_csv.exists()
+    with open(settings.summaries_csv, "a", newline="", encoding="utf-8") as cf:
+        w = csv.writer(cf)
+        if first:
+            w.writerow(["run_timestamp", "creator", "summary"])
+        w.writerow([run_ts.isoformat(), phone, summary])
+    logger.info(f"Appended summary for {phone}")
+
+
+def job_summarize():
+    """
+    Scheduled job: summarize chats for all phones in parallel and upload results.
+    Runs four times a day as per scheduler.
+    """
+    now = datetime.now(pytz.timezone(settings.timezone))
+    phone_dirs = [d for d in settings.processed_dir.iterdir() if d.is_dir()]
+
+    def process(phone_dir):
+        phone = phone_dir.name
+        txt = phone_dir / f"{phone}.txt"
+        if not txt.exists():
+            return
+        upload_file(str(txt), "chats")
+        msgs = parse_whatsapp(str(txt))
+        if not msgs:
+            logger.info(f"No msgs for {phone}")
+            return
+        summary = summarize_messages(msgs)
+        append_summary(now, phone, summary)
+
+    # Parallelize across 10 workers
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(process, phone_dirs)
+
+    # Upload summaries CSV\ n    upload_file(str(settings.summaries_csv), "summaries")
+    logger.info("Scheduled summarization completed.")
+
+
+# parser.py
+
+import os
+import re
+import zipfile
+import shutil
+from pathlib import Path
+from datetime import datetime
+from watchdog.observers.polling import PollingObserver
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+import pytz
+import json
+
+from config import settings
+from logger import logger
+
+# timezone for parsing timestamps
+TZ = pytz.timezone(settings.timezone)
+
+# regex for cleaning phone folder names
+_DIGITS_ONLY = re.compile(r"\D+")
+
+# regex to detect date-only lines (e.g. 28/04/25 or 28/04/2025)
+_DATE_ONLY = re.compile(r"^(\d{1,2}/\d{1,2}/\d{2,4})$")
+
+# patterns to skip in normalization
+_SKIP_PATTERNS = [
+    re.compile(r"^#"),          
+    re.compile(r"^-{3,}"),      
+    re.compile(r"^Messages to this group")
+]
+
+def normalize_chat_format(txt_path: Path):
+    """
+    Rewrite an extracted chat file so each line is:
+      DD/MM/YYYY, HH:MM - Sender: message
+    """
+    lines = txt_path.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    current_date = None
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if any(p.match(line) for p in _SKIP_PATTERNS):
+            continue
+        m_date = _DATE_ONLY.match(line)
+        if m_date:
+            d, mth, y = m_date.group(1).split("/")
+            if len(y) == 2:
+                y = "20" + y
+            current_date = f"{d.zfill(2)}/{mth.zfill(2)}/{y}"
+            continue
+        if not current_date:
+            continue
+        # default time & sender
+        time = "00:00"
+        sender = "Unknown"
+        message = line
+        new_lines.append(f"{current_date}, {time} - {sender}: {message}")
+
+    txt_path.write_text("\n".join(new_lines), encoding="utf-8")
+    logger.info(f"Normalized chat format for {txt_path.name}")
+
+class ZipHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        src = Path(event.src_path)
+        if not event.is_directory and src.suffix.lower() == ".zip":
+            logger.info(f"Detected new ZIP: {src}")
+            try:
+                with zipfile.ZipFile(src, "r") as zf:
+                    for member in zf.namelist():
+                        if not member.lower().endswith(".txt"):
+                            continue
+
+                        raw = Path(member).stem
+                        phone = _DIGITS_ONLY.sub("", raw)
+                        if not phone:
+                            logger.warning(f"Could not normalize phone from '{raw}'")
+                            continue
+
+                        dest_dir = settings.processed_dir / phone
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_path = dest_dir / f"{phone}.txt"
+
+                        if dest_path.exists():
+                            logger.info(f"Skipped existing chat for {phone}")
+                            continue
+
+                        with zf.open(member) as src_file, open(dest_path, "wb") as dst_file:
+                            shutil.copyfileobj(src_file, dst_file)
+                        logger.info(f"Extracted chat for {phone} → {dest_path}")
+
+                        normalize_chat_format(dest_path)
+
+                # archive the ZIP
+                archive = settings.base_dir / "processed_zips"
+                archive.mkdir(exist_ok=True)
+                shutil.move(str(src), archive / src.name)
+
+            except Exception as e:
+                logger.error(f"Failed extracting {src}: {e}")
+
+def process_existing_zips():
+    for zip_path in settings.exported_dir.glob("*.zip"):
+        fake = type("E", (), {"is_directory": False, "src_path": str(zip_path)})
+        ZipHandler().on_created(fake)
+
+def start_zip_watcher():
+    settings.exported_dir.mkdir(parents=True, exist_ok=True)
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+
+    process_existing_zips()
+
+    observer = PollingObserver()
+    observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+    observer.start()
+    logger.info("Started ZIP watcher using PollingObserver.")
+    return observer
+
+def bootstrap_conversation(phone: str, display_name: str):
+    folder = settings.processed_dir / phone
+    if not os.path.isdir(folder):
+        try:
+            os.makedirs(folder, exist_ok=True)
+            (folder / f"{phone}.txt").touch()
+            with open(folder / "meta.json", "w", encoding="utf-8") as mf:
+                json.dump({"display_name": display_name}, mf)
+            logger.info(f"Bootstrapped {phone} ({display_name})")
+        except Exception as e:
+            logger.error(f"Bootstrap error {phone}: {e}")
+
+def append_to_txt(phone: str, sender: str, text: str):
+    folder = settings.processed_dir / phone
+    folder.mkdir(parents=True, exist_ok=True)
+    txt_path = folder / f"{phone}.txt"
+    timestamp = datetime.now(TZ).strftime("%d/%m/%Y, %H:%M")
+    line = f"{timestamp} - {sender}: {text}"
+    with FileLock(str(txt_path) + ".lock"):
+        with open(txt_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    logger.info(f"Appended -> {phone}.txt: {line}")
+
+def parse_whatsapp(txt_path: str):
+    msgs = []
+    pattern = re.compile(r'^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) - (.*?): (.*)$')
+    for ln in Path(txt_path).read_text(encoding="utf-8").splitlines():
+        m = pattern.match(ln)
+        if m:
+            ds, ts, snd, msg = m.groups()
+            try:
+                dt = datetime.strptime(f"{ds} {ts}", "%d/%m/%Y %H:%M")
+            except ValueError:
+                logger.warning(f"Skipping invalid date/time: {ds} {ts}")
+                continue
+            msgs.append({
+                "timestamp": TZ.localize(dt).isoformat(),
+                "sender": snd,
+                "message": msg.strip()
+            })
+    return msgs
+
+
+
+# storage.py
+from pathlib import Path
+from google.cloud import storage
+from config import settings
+
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+29/04/2025, 22:05 - Kunal Khadgi: # query_engine.py
+"""
+NL → SQL module with RAG context and error handling.
+"""
+import sqlite3
+import re
+import logging
+from pathlib import Path
+from config import settings
+from memory import retrieve_context
+from google import genai
+
+# set up logging
+logger = logging.getLogger("query_engine")
+logger.setLevel(logging.INFO)
+
+# Path to persistent SQLite DB
+DB_PATH = Path(__file__).parent / "messages.db"
+
+# Initialize database if needed
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            phone TEXT,
+            timestamp TEXT,
+            sender TEXT,
+            message TEXT
+        )
+    """.strip())
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Helper to get a DB connection
+def get_db_conn():
+    return sqlite3.connect(DB_PATH)
+
+
+def nl_to_sql(nl_query: str) -> str:
+    """
+    Converts a natural language question into a single valid SQLite query,
+    augmented by relevant past chat context.
+    """
+    # 1) Retrieve top-5 relevant chat snippets
+    context = retrieve_context(nl_query, top_k=5)
+    if not context.strip():
+        context = "<no relevant past chat found>"
+    
+    # 2) Build prompt with schema, context, example, and user question
+    prompt = f"""
+You are an assistant that outputs exactly one valid SQLite query (no code fences)
+for this schema:
+  messages(phone, timestamp, sender, message)
+
+Here are the most relevant past chat lines:
+{context}
+
+### Example
+User question: "Who sent the most messages in the last 7 days?"
+SQL:
+  SELECT sender, COUNT(*) AS cnt
+    FROM messages
+   WHERE timestamp >= datetime('now','-7 days')
+   GROUP BY sender
+   ORDER BY cnt DESC
+   LIMIT 5;
+
+### Now your turn
+User question: "{nl_query}"
+SQL:
+"""
+    try:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        resp = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+        )
+        raw_sql = resp.text.strip()
+        # fallback strip code fences if any
+        sql = re.sub(r"^```[a-zA-Z]*\n", "", raw_sql)
+        sql = re.sub(r"\n```$", "", sql)
+        return sql
+    except Exception as e:
+        logger.error(f"NL→SQL generation error: {e}")
+        raise
+
+
+def run_query(nl_query: str) -> str:
+    """
+    Executes the SQL generated from nl_query and returns a text table or error message.
+    """
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL query: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if rows else []
+        if not rows:
+            return "No results found for your query."
+        # Format table
+        header = " | ".join(cols)
+        sep = "-" * len(header)
+        lines = [header, sep]
+        for r in rows:
+            lines.append(" | ".join(str(v) for v in r))
+        return "\n".join(lines)
+    except sqlite3.OperationalError as oe:
+        logger.error(f"SQL execution error: {oe}")
+        return f"SQL error: {oe}"  
+    except Exception as e:
+        logger.error(f"Unexpected error in run_query: {e}")
+        return f"Error processing query: {e}"
+    finally:
+        conn.close()
+
+
+# summarizer.py
+import csv
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import pytz
+from google import genai
+from config import settings
+from parser import parse_whatsapp
+from storage import upload_file
+from logger import logger
+
+# Initialize Gemini client for summarization
+genai_client = genai.Client(api_key=settings.gemini_api_key)
+
+
+def summarize_messages(msgs: list) -> str:
+    """
+    Summarize the last 100 messages in a chat using Gemini.
+    Returns the summary text.
+    """
+    excerpt = msgs[-100:]
+    prompt = (
+        "You are a marketing assistant. Summarize key points & tone:\n\n"
+        + "\n".join(f"{m['timestamp']} | {m['sender']}: {m['message']}" for m in excerpt)
+        + "\n\nSummary:"
+    )
+    resp = genai_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+    )
+    return resp.text.strip()
+
+
+def append_summary(run_ts: datetime, phone: str, summary: str):
+    """
+    Append a summary entry to the summaries CSV file.
+    """
+    first = not settings.summaries_csv.exists()
+    with open(settings.summaries_csv, "a", newline="", encoding="utf-8") as cf:
+        w = csv.writer(cf)
+        if first:
+            w.writerow(["run_timestamp", "creator", "summary"])
+        w.writerow([run_ts.isoformat(), phone, summary])
+    logger.info(f"Appended summary for {phone}")
+
+
+def job_summarize():
+    """
+    Scheduled job: summarize chats for all phones in parallel and upload results.
+    Runs four times a day as per scheduler.
+    """
+    now = datetime.now(pytz.timezone(settings.timezone))
+    phone_dirs = [d for d in settings.processed_dir.iterdir() if d.is_dir()]
+
+    def process(phone_dir):
+        phone = phone_dir.name
+        txt = phone_dir / f"{phone}.txt"
+        if not txt.exists():
+            return
+        upload_file(str(txt), "chats")
+        msgs = parse_whatsapp(str(txt))
+        if not msgs:
+            logger.info(f"No msgs for {phone}")
+            return
+        summary = summarize_messages(msgs)
+        append_summary(now, phone, summary)
+
+    # Parallelize across 10 workers
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(process, phone_dirs)
+
+    # Upload summaries CSV\ n    upload_file(str(settings.summaries_csv), "summaries")
+    logger.info("Scheduled summarization completed.")
+
+
+# parser.py
+
+import os
+import re
+import zipfile
+import shutil
+from pathlib import Path
+from datetime import datetime
+from watchdog.observers.polling import PollingObserver
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+import pytz
+import json
+
+from config import settings
+from logger import logger
+
+# timezone for parsing timestamps
+TZ = pytz.timezone(settings.timezone)
+
+# regex for cleaning phone folder names
+_DIGITS_ONLY = re.compile(r"\D+")
+
+# regex to detect date-only lines (e.g. 28/04/25 or 28/04/2025)
+_DATE_ONLY = re.compile(r"^(\d{1,2}/\d{1,2}/\d{2,4})$")
+
+# patterns to skip in normalization
+_SKIP_PATTERNS = [
+    re.compile(r"^#"),          
+    re.compile(r"^-{3,}"),      
+    re.compile(r"^Messages to this group")
+]
+
+def normalize_chat_format(txt_path: Path):
+    """
+    Rewrite an extracted chat file so each line is:
+      DD/MM/YYYY, HH:MM - Sender: message
+    """
+    lines = txt_path.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    current_date = None
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if any(p.match(line) for p in _SKIP_PATTERNS):
+            continue
+        m_date = _DATE_ONLY.match(line)
+        if m_date:
+            d, mth, y = m_date.group(1).split("/")
+            if len(y) == 2:
+                y = "20" + y
+            current_date = f"{d.zfill(2)}/{mth.zfill(2)}/{y}"
+            continue
+        if not current_date:
+            continue
+        # default time & sender
+        time = "00:00"
+        sender = "Unknown"
+        message = line
+        new_lines.append(f"{current_date}, {time} - {sender}: {message}")
+
+    txt_path.write_text("\n".join(new_lines), encoding="utf-8")
+    logger.info(f"Normalized chat format for {txt_path.name}")
+
+class ZipHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        src = Path(event.src_path)
+        if not event.is_directory and src.suffix.lower() == ".zip":
+            logger.info(f"Detected new ZIP: {src}")
+            try:
+                with zipfile.ZipFile(src, "r") as zf:
+                    for member in zf.namelist():
+                        if not member.lower().endswith(".txt"):
+                            continue
+
+                        raw = Path(member).stem
+                        phone = _DIGITS_ONLY.sub("", raw)
+                        if not phone:
+                            logger.warning(f"Could not normalize phone from '{raw}'")
+                            continue
+
+                        dest_dir = settings.processed_dir / phone
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_path = dest_dir / f"{phone}.txt"
+
+                        if dest_path.exists():
+                            logger.info(f"Skipped existing chat for {phone}")
+                            continue
+
+                        with zf.open(member) as src_file, open(dest_path, "wb") as dst_file:
+                            shutil.copyfileobj(src_file, dst_file)
+                        logger.info(f"Extracted chat for {phone} → {dest_path}")
+
+                        normalize_chat_format(dest_path)
+
+                # archive the ZIP
+                archive = settings.base_dir / "processed_zips"
+                archive.mkdir(exist_ok=True)
+                shutil.move(str(src), archive / src.name)
+
+            except Exception as e:
+                logger.error(f"Failed extracting {src}: {e}")
+
+def process_existing_zips():
+    for zip_path in settings.exported_dir.glob("*.zip"):
+        fake = type("E", (), {"is_directory": False, "src_path": str(zip_path)})
+        ZipHandler().on_created(fake)
+
+def start_zip_watcher():
+    settings.exported_dir.mkdir(parents=True, exist_ok=True)
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+
+    process_existing_zips()
+
+    observer = PollingObserver()
+    observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+    observer.start()
+    logger.info("Started ZIP watcher using PollingObserver.")
+    return observer
+
+def bootstrap_conversation(phone: str, display_name: str):
+    folder = settings.processed_dir / phone
+    if not os.path.isdir(folder):
+        try:
+            os.makedirs(folder, exist_ok=True)
+            (folder / f"{phone}.txt").touch()
+            with open(folder / "meta.json", "w", encoding="utf-8") as mf:
+                json.dump({"display_name": display_name}, mf)
+            logger.info(f"Bootstrapped {phone} ({display_name})")
+        except Exception as e:
+            logger.error(f"Bootstrap error {phone}: {e}")
+
+def append_to_txt(phone: str, sender: str, text: str):
+    folder = settings.processed_dir / phone
+    folder.mkdir(parents=True, exist_ok=True)
+    txt_path = folder / f"{phone}.txt"
+    timestamp = datetime.now(TZ).strftime("%d/%m/%Y, %H:%M")
+    line = f"{timestamp} - {sender}: {text}"
+    with FileLock(str(txt_path) + ".lock"):
+        with open(txt_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    logger.info(f"Appended -> {phone}.txt: {line}")
+
+def parse_whatsapp(txt_path: str):
+    msgs = []
+    pattern = re.compile(r'^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) - (.*?): (.*)$')
+    for ln in Path(txt_path).read_text(encoding="utf-8").splitlines():
+        m = pattern.match(ln)
+        if m:
+            ds, ts, snd, msg = m.groups()
+            try:
+                dt = datetime.strptime(f"{ds} {ts}", "%d/%m/%Y %H:%M")
+            except ValueError:
+                logger.warning(f"Skipping invalid date/time: {ds} {ts}")
+                continue
+            msgs.append({
+                "timestamp": TZ.localize(dt).isoformat(),
+                "sender": snd,
+                "message": msg.strip()
+            })
+    return msgs
+
+
+
+# storage.py
+from pathlib import Path
+from google.cloud import storage
+from config import settings
+
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+29/04/2025, 22:09 - Kunal Khadgi: 1. zip file uploads will be processed to txt files 
+2. these txt files will get stored to vector db and sql
+3. live msgs will also be stored in vector db through webhook endpoint
+4. and a search endpoint for custom gpt to query
+29/04/2025, 22:09 - Kunal Khadgi: 1. zip file uploads will be processed to txt files 
+2. these txt files will get stored to vector db and sql
+3. live msgs will also be stored in vector db through webhook endpoint
+4. and a search endpoint for custom gpt to query
+29/04/2025, 22:09 - Kunal Khadgi: u want txt or files ??
+29/04/2025, 22:09 - Kunal Khadgi: # query_engine.py
+"""
+NL → SQL module with RAG context and error handling.
+"""
+import sqlite3
+import re
+import logging
+from pathlib import Path
+from config import settings
+from memory import retrieve_context
+from google import genai
+
+# set up logging
+logger = logging.getLogger("query_engine")
+logger.setLevel(logging.INFO)
+
+# Path to persistent SQLite DB
+DB_PATH = Path(__file__).parent / "messages.db"
+
+# Initialize database if needed
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            phone TEXT,
+            timestamp TEXT,
+            sender TEXT,
+            message TEXT
+        )
+    """.strip())
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Helper to get a DB connection
+def get_db_conn():
+    return sqlite3.connect(DB_PATH)
+
+
+def nl_to_sql(nl_query: str) -> str:
+    """
+    Converts a natural language question into a single valid SQLite query,
+    augmented by relevant past chat context.
+    """
+    # 1) Retrieve top-5 relevant chat snippets
+    context = retrieve_context(nl_query, top_k=5)
+    if not context.strip():
+        context = "<no relevant past chat found>"
+    
+    # 2) Build prompt with schema, context, example, and user question
+    prompt = f"""
+You are an assistant that outputs exactly one valid SQLite query (no code fences)
+for this schema:
+  messages(phone, timestamp, sender, message)
+
+Here are the most relevant past chat lines:
+{context}
+
+### Example
+User question: "Who sent the most messages in the last 7 days?"
+SQL:
+  SELECT sender, COUNT(*) AS cnt
+    FROM messages
+   WHERE timestamp >= datetime('now','-7 days')
+   GROUP BY sender
+   ORDER BY cnt DESC
+   LIMIT 5;
+
+### Now your turn
+User question: "{nl_query}"
+SQL:
+"""
+    try:
+        client = genai.Client(api_key=settings.gemini_api_key)
+        resp = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+        )
+        raw_sql = resp.text.strip()
+        # fallback strip code fences if any
+        sql = re.sub(r"^```[a-zA-Z]*\n", "", raw_sql)
+        sql = re.sub(r"\n```$", "", sql)
+        return sql
+    except Exception as e:
+        logger.error(f"NL→SQL generation error: {e}")
+        raise
+
+
+def run_query(nl_query: str) -> str:
+    """
+    Executes the SQL generated from nl_query and returns a text table or error message.
+    """
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL query: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if rows else []
+        if not rows:
+            return "No results found for your query."
+        # Format table
+        header = " | ".join(cols)
+        sep = "-" * len(header)
+        lines = [header, sep]
+        for r in rows:
+            lines.append(" | ".join(str(v) for v in r))
+        return "\n".join(lines)
+    except sqlite3.OperationalError as oe:
+        logger.error(f"SQL execution error: {oe}")
+        return f"SQL error: {oe}"  
+    except Exception as e:
+        logger.error(f"Unexpected error in run_query: {e}")
+        return f"Error processing query: {e}"
+    finally:
+        conn.close()
+
+
+# summarizer.py
+import csv
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import pytz
+from google import genai
+from config import settings
+from parser import parse_whatsapp
+from storage import upload_file
+from logger import logger
+
+# Initialize Gemini client for summarization
+genai_client = genai.Client(api_key=settings.gemini_api_key)
+
+
+def summarize_messages(msgs: list) -> str:
+    """
+    Summarize the last 100 messages in a chat using Gemini.
+    Returns the summary text.
+    """
+    excerpt = msgs[-100:]
+    prompt = (
+        "You are a marketing assistant. Summarize key points & tone:\n\n"
+        + "\n".join(f"{m['timestamp']} | {m['sender']}: {m['message']}" for m in excerpt)
+        + "\n\nSummary:"
+    )
+    resp = genai_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+    )
+    return resp.text.strip()
+
+
+def append_summary(run_ts: datetime, phone: str, summary: str):
+    """
+    Append a summary entry to the summaries CSV file.
+    """
+    first = not settings.summaries_csv.exists()
+    with open(settings.summaries_csv, "a", newline="", encoding="utf-8") as cf:
+        w = csv.writer(cf)
+        if first:
+            w.writerow(["run_timestamp", "creator", "summary"])
+        w.writerow([run_ts.isoformat(), phone, summary])
+    logger.info(f"Appended summary for {phone}")
+
+
+def job_summarize():
+    """
+    Scheduled job: summarize chats for all phones in parallel and upload results.
+    Runs four times a day as per scheduler.
+    """
+    now = datetime.now(pytz.timezone(settings.timezone))
+    phone_dirs = [d for d in settings.processed_dir.iterdir() if d.is_dir()]
+
+    def process(phone_dir):
+        phone = phone_dir.name
+        txt = phone_dir / f"{phone}.txt"
+        if not txt.exists():
+            return
+        upload_file(str(txt), "chats")
+        msgs = parse_whatsapp(str(txt))
+        if not msgs:
+            logger.info(f"No msgs for {phone}")
+            return
+        summary = summarize_messages(msgs)
+        append_summary(now, phone, summary)
+
+    # Parallelize across 10 workers
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        executor.map(process, phone_dirs)
+
+    # Upload summaries CSV\ n    upload_file(str(settings.summaries_csv), "summaries")
+    logger.info("Scheduled summarization completed.")
+
+
+# parser.py
+
+import os
+import re
+import zipfile
+import shutil
+from pathlib import Path
+from datetime import datetime
+from watchdog.observers.polling import PollingObserver
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+import pytz
+import json
+
+from config import settings
+from logger import logger
+
+# timezone for parsing timestamps
+TZ = pytz.timezone(settings.timezone)
+
+# regex for cleaning phone folder names
+_DIGITS_ONLY = re.compile(r"\D+")
+
+# regex to detect date-only lines (e.g. 28/04/25 or 28/04/2025)
+_DATE_ONLY = re.compile(r"^(\d{1,2}/\d{1,2}/\d{2,4})$")
+
+# patterns to skip in normalization
+_SKIP_PATTERNS = [
+    re.compile(r"^#"),          
+    re.compile(r"^-{3,}"),      
+    re.compile(r"^Messages to this group")
+]
+
+def normalize_chat_format(txt_path: Path):
+    """
+    Rewrite an extracted chat file so each line is:
+      DD/MM/YYYY, HH:MM - Sender: message
+    """
+    lines = txt_path.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    current_date = None
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if any(p.match(line) for p in _SKIP_PATTERNS):
+            continue
+        m_date = _DATE_ONLY.match(line)
+        if m_date:
+            d, mth, y = m_date.group(1).split("/")
+            if len(y) == 2:
+                y = "20" + y
+            current_date = f"{d.zfill(2)}/{mth.zfill(2)}/{y}"
+            continue
+        if not current_date:
+            continue
+        # default time & sender
+        time = "00:00"
+        sender = "Unknown"
+        message = line
+        new_lines.append(f"{current_date}, {time} - {sender}: {message}")
+
+    txt_path.write_text("\n".join(new_lines), encoding="utf-8")
+    logger.info(f"Normalized chat format for {txt_path.name}")
+
+class ZipHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        src = Path(event.src_path)
+        if not event.is_directory and src.suffix.lower() == ".zip":
+            logger.info(f"Detected new ZIP: {src}")
+            try:
+                with zipfile.ZipFile(src, "r") as zf:
+                    for member in zf.namelist():
+                        if not member.lower().endswith(".txt"):
+                            continue
+
+                        raw = Path(member).stem
+                        phone = _DIGITS_ONLY.sub("", raw)
+                        if not phone:
+                            logger.warning(f"Could not normalize phone from '{raw}'")
+                            continue
+
+                        dest_dir = settings.processed_dir / phone
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        dest_path = dest_dir / f"{phone}.txt"
+
+                        if dest_path.exists():
+                            logger.info(f"Skipped existing chat for {phone}")
+                            continue
+
+                        with zf.open(member) as src_file, open(dest_path, "wb") as dst_file:
+                            shutil.copyfileobj(src_file, dst_file)
+                        logger.info(f"Extracted chat for {phone} → {dest_path}")
+
+                        normalize_chat_format(dest_path)
+
+                # archive the ZIP
+                archive = settings.base_dir / "processed_zips"
+                archive.mkdir(exist_ok=True)
+                shutil.move(str(src), archive / src.name)
+
+            except Exception as e:
+                logger.error(f"Failed extracting {src}: {e}")
+
+def process_existing_zips():
+    for zip_path in settings.exported_dir.glob("*.zip"):
+        fake = type("E", (), {"is_directory": False, "src_path": str(zip_path)})
+        ZipHandler().on_created(fake)
+
+def start_zip_watcher():
+    settings.exported_dir.mkdir(parents=True, exist_ok=True)
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+
+    process_existing_zips()
+
+    observer = PollingObserver()
+    observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+    observer.start()
+    logger.info("Started ZIP watcher using PollingObserver.")
+    return observer
+
+def bootstrap_conversation(phone: str, display_name: str):
+    folder = settings.processed_dir / phone
+    if not os.path.isdir(folder):
+        try:
+            os.makedirs(folder, exist_ok=True)
+            (folder / f"{phone}.txt").touch()
+            with open(folder / "meta.json", "w", encoding="utf-8") as mf:
+                json.dump({"display_name": display_name}, mf)
+            logger.info(f"Bootstrapped {phone} ({display_name})")
+        except Exception as e:
+            logger.error(f"Bootstrap error {phone}: {e}")
+
+def append_to_txt(phone: str, sender: str, text: str):
+    folder = settings.processed_dir / phone
+    folder.mkdir(parents=True, exist_ok=True)
+    txt_path = folder / f"{phone}.txt"
+    timestamp = datetime.now(TZ).strftime("%d/%m/%Y, %H:%M")
+    line = f"{timestamp} - {sender}: {text}"
+    with FileLock(str(txt_path) + ".lock"):
+        with open(txt_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    logger.info(f"Appended -> {phone}.txt: {line}")
+
+def parse_whatsapp(txt_path: str):
+    msgs = []
+    pattern = re.compile(r'^(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{2}) - (.*?): (.*)$')
+    for ln in Path(txt_path).read_text(encoding="utf-8").splitlines():
+        m = pattern.match(ln)
+        if m:
+            ds, ts, snd, msg = m.groups()
+            try:
+                dt = datetime.strptime(f"{ds} {ts}", "%d/%m/%Y %H:%M")
+            except ValueError:
+                logger.warning(f"Skipping invalid date/time: {ds} {ts}")
+                continue
+            msgs.append({
+                "timestamp": TZ.localize(dt).isoformat(),
+                "sender": snd,
+                "message": msg.strip()
+            })
+    return msgs
+
+
+
+# storage.py
+from pathlib import Path
+from google.cloud import storage
+from config import settings
+
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+29/04/2025, 22:09 - Kunal Khadgi: # unified_app.py (FAST version)
+"""
+Unified WhatsApp Automation Application v2 - Multithreaded Embedding
+- ZIP watcher
+- Chat parsing
+- Immediate storage: SQLite + FAISS
+- Scheduled summarization & backups
+- Multithreaded embeddings for faster performance
+"""
+import os
+import json
+import sqlite3
+import re
+import logging
+import shutil
+from pathlib import Path
+from datetime import datetime
+import pytz
+import numpy as np
+import faiss
+import openai
+from google import genai
+from flask import Flask, request, jsonify, Blueprint, abort
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from filelock import FileLock
+from summarizer import job_summarize
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.cloud import storage
+import http.client
+
+# app-specific settings
+from config import settings
+from parser import parse_whatsapp, ZipHandler, append_to_txt, bootstrap_conversation
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(settings.log_file), logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Initialize GCS client
+gcs_client = storage.Client.from_service_account_json(str(settings.gcp_key_file))
+gcs_bucket = gcs_client.bucket(settings.gcp_bucket)
+
+# Backup helper
+def backup_local_files():
+    try:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = settings.base_dir / 'backups'
+        backup_dir.mkdir(exist_ok=True)
+        shutil.copy2(DB_PATH, backup_dir / f"messages_{ts}.db")
+        shutil.copy2(INDEX_PATH, backup_dir / f"whatsapp_index_{ts}.index")
+        shutil.copy2(METAS_PATH, backup_dir / f"whatsapp_metas_{ts}.npy")
+        upload_file(str(backup_dir / f"messages_{ts}.db"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_index_{ts}.index"), "backups")
+        upload_file(str(backup_dir / f"whatsapp_metas_{ts}.npy"), "backups")
+        logger.info("Backup created.")
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def upload_file(local_path: str, folder: str):
+    blob = gcs_bucket.blob(f"{folder}/{Path(local_path).name}")
+    blob.upload_from_filename(str(local_path))
+
+# Database setup
+DB_PATH = settings.base_dir / 'messages.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute(
+        '''CREATE TABLE IF NOT EXISTS messages(
+               phone TEXT,
+               timestamp TEXT,
+               sender TEXT,
+               message TEXT,
+               UNIQUE(phone, timestamp, sender, message)
+           )'''
+    )
+    conn.commit()
+    conn.close()
+
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
+
+init_db()
+
+# FAISS + OpenAI setup
+TZ = pytz.timezone(settings.timezone)
+EMBED_MODEL = "text-embedding-3-small"
+DIM = 1536
+
+faiss_dir = settings.base_dir / 'faiss_db'
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / 'whatsapp.index'
+METAS_PATH = faiss_dir / 'whatsapp_metas.npy'
+
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH), faiss.IO_FLAG_MMAP)
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexHNSWFlat(DIM, 32)
+    metas = []
+
+if len(metas) > 50000:
+    metas = metas[-50000:]
+
+openai.api_key = settings.openai_api_key
+gen_client = genai.Client(api_key=settings.gemini_api_key)
+
+# Multithread pool
+executor = ThreadPoolExecutor(max_workers=10)
+futures = {}
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def _embed(texts: list[str]) -> np.ndarray:
+    resp = openai.Embedding.create(
+        model=EMBED_MODEL,
+        input=texts
+    )
+    vecs = np.array([d['embedding'] for d in resp['data']], dtype='float32')
+    faiss.normalize_L2(vecs)
+    return vecs
+
+# WhatsApp sending
+def _send_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection('api.ultramsg.com')
+        payload = json.dumps({
+            'token': settings.token,
+            'to': to,
+            'body': text
+        })
+        headers = {'Content-Type': 'application/json'}
+        conn.request('POST', f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending WhatsApp: {e}")
+
+# Fast store_message
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def store_message(phone: str, sender: str, message: str, ts: str):
+    uid = f"{phone}|{ts}|{sender}"
+
+    if any(m['uid'] == uid and m['message'] == message for m in metas):
+        logger.info(f"Duplicate skipped {uid}")
+        return
+
+    try:
+        conn = get_db_conn()
+        conn.execute(
+            'INSERT OR IGNORE INTO messages(phone, timestamp, sender, message) VALUES (?, ?, ?, ?)',
+            (phone, ts, sender, message)
+        )
+        conn.commit()
+        conn.close()
+        print("stored msg to ")
+    except Exception as e:
+        logger.error(f"SQLite error: {e}")
+        return
+
+    # Async embed
+    future = executor.submit(_embed, [message])
+    futures[future] = (uid, phone, sender, ts, message)
+
+def finish_embeddings():
+    for future in as_completed(futures):
+        try:
+            emb = future.result(timeout=30)
+            uid, phone, sender, ts, message = futures[future]
+
+            index.add(emb)
+            metas.append({'uid': uid, 'phone': phone, 'sender': sender, 'timestamp': ts, 'message': message})
+
+        except Exception as e:
+            logger.error(f"Embedding add fail: {e}")
+
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+    logger.info("Saved FAISS & metas.")
+
+# Retrieve semantic context via FAISS
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    try:
+        q_emb = _embed([query])
+    except Exception:
+        return ''
+    distances, indices = index.search(q_emb, top_k)
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(metas):
+            continue
+        m = metas[idx]
+        lines.append(f"{m['timestamp']} | {m['sender']} (Chat {m['phone']}): {m['message']}")
+    return '\n'.join(lines)
+
+# NL→SQL conversion and execution
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1), retry=retry_if_exception_type(Exception))
+def nl_to_sql(nl_query: str) -> str:
+    ctx = retrieve_context(nl_query, 5) or '<no context>'
+    prompt = f"""
+You output one valid SQLite query for messages(phone, timestamp, sender, message).
+Context:
+{ctx}
+
+User: \"{nl_query}\"
+SQL:
+"""
+    resp = gen_client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt
+    )
+    raw = resp.text.strip()
+    sql = re.sub(r'^```.*?\n', '', raw)
+    sql = re.sub(r'\n```$', '', sql)
+    return sql
+
+def run_query(nl_query: str) -> str:
+    conn = get_db_conn()
+    try:
+        sql = nl_to_sql(nl_query)
+        logger.info(f"Running SQL: {sql}")
+        cur = conn.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in (cur.description or [])]
+        if not rows:
+            return 'No results.'
+        hdr = ' | '.join(cols)
+        sep = '-' * len(hdr)
+        lines = [hdr, sep] + [' | '.join(str(v) for v in r) for r in rows]
+        return '\n'.join(lines)
+    except sqlite3.OperationalError as oe:
+        return f"SQL error: {oe}"
+    except Exception as e:
+        return f"Error: {e}"
+    finally:
+        conn.close()
+
+# Flask application setup
+def require_api(f):
+    def wrapped(*args, **kwargs):
+        key = request.headers.get('X-API-KEY')
+        logger.info(f"Received X-API-KEY: {key}")
+        if key != settings.custom_gpt_api_key:
+            abort(401)
+        return f(*args, **kwargs)
+    wrapped.__name__ = f.__name__
+    return wrapped
+
+app = Flask(__name__)
+webhook_bp = Blueprint('webhook', __name__)
+
+@webhook_bp.route('/webhook', methods=['POST'])
+def whatsapp_webhook():
+    d = request.json.get('data', {})
+    fm = d.get('fromMe', False)
+    body = d.get('body', '').strip()
+    fr = d.get('from', '')
+    # handle /query command
+    if fm and body.lower().startswith('/query '):
+        nl = body[len('/query '):].strip()
+        reply = run_query(nl)
+        _send_message(fr, reply)
+        return 'queried', 200
+    # ignore non-chat, group, newsletter, or empty
+    if d.get('type') != 'chat' or d.get('type') == 'newsletter' or '@g.us' in fr or not body:
+        return 'ignored', 200
+    # incoming chat
+    phone = fr.replace('@c.us', '')
+    sender = d.get('pushname') or phone
+    bootstrap_conversation(phone, sender)
+    ts = datetime.now(TZ).isoformat()
+    append_to_txt(phone, sender, body)
+    store_message(phone, sender, body, ts)
+    return 'ok', 200
+
+@webhook_bp.route('/query', methods=['POST'])
+def api_query():
+    data = request.json or {}
+    q = data.get('query', '')
+    ans = run_query(q)
+    return jsonify({'answer': ans})
+
+@webhook_bp.route('/search', methods=['POST'])
+def semantic_search():
+    """
+    Semantic search endpoint for Custom GPT
+    Input: { "query": "your question" }
+    Output: { "context": "matching chat messages" }
+    """
+    try:
+        data = request.json or {}
+        query = data.get('query', '').strip()
+        if not query:
+            return jsonify({"error": "Query cannot be empty"}), 400
+
+        # Use existing retrieve_context function
+        context = retrieve_context(query, top_k=5)
+
+        if not context:
+            return jsonify({"context": "No relevant chats found."})
+        
+        return jsonify({"context": context})
+    except Exception as e:
+        logger.error(f"Semantic search error: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+app.register_blueprint(webhook_bp)
+
+# Scheduler jobs
+scheduler = BackgroundScheduler(timezone=TZ)
+scheduler.add_job(backup_local_files, CronTrigger.from_crontab("0 */6 * * *"), id='backup')
+scheduler.add_job(job_summarize, CronTrigger.from_crontab(settings.cron_expression), id='summaries')
+scheduler.start()
+
+observer = Observer()
+observer.schedule(ZipHandler(), str(settings.exported_dir), recursive=False)
+observer.start()
+
+if __name__ == '__main__':
+    settings.processed_dir.mkdir(parents=True, exist_ok=True)
+    for d in settings.processed_dir.iterdir():
+        if not d.is_dir(): continue
+        txt = d / f"{d.name}.txt"
+        if not txt.exists(): continue
+        msgs = parse_whatsapp(str(txt))
+        for m in msgs:
+            store_message(d.name, m['sender'], m['message'], m['timestamp'])
+    finish_embeddings()
+    logger.info('Started unified_app v2 - Fast Mode')
+    app.run(host='0.0.0.0', port=settings.port, debug=False, use_reloader=False)
+    observer.stop()
+    observer.join()
+
+# config.py
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    base_dir: Path = Path(__file__).parent
+    exported_dir: Path = base_dir / "exported_data"
+    processed_dir: Path = base_dir / "processed_exported_data"
+    summaries_csv: Path  = base_dir / "chat_summaries.csv"
+    state_file: Path     = base_dir / "state.json"
+    log_file: Path       = base_dir / "pipeline.log"
+    gcp_key_file: Path   = base_dir / "generated-key.json"
+
+    # environment variables
+    gcp_bucket: str                   = "mosaic_wellness_whatsapp_bucket"
+    instance_id: str                  = "115449"
+    token: str                        = "ctc8smu872u1rez4"
+    gemini_api_key: str               = "AIzaSyAVD4dg6v10sWgbqfo2CqZpWcoHo5VUEvY"
+    gemini_model: str                 = "gemini-2.0-flash"
+    gemini_embedding_model: str       = "gemini-embedding-exp-03-07"
+    openai_api_key: str               = "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"
+    custom_gpt_api_key: str           = "laodtgvsghnxerpkatbdhrsgksliwwgdxwbjrtvrfzxnvddplsseklalrreirlmcalwoipxwlxsanvpkwctxurqiyspzwpbaejoabigpduibfqjlgoiyicwlokgbhnkv"
+    # other settings
+    timezone: str                     = "Asia/Kolkata"
+    cron_expression: str              = "0 */6 * * *"
+    port: int                         = 5000
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
+
+settings = Settings()
+
+# logger.py
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from config import settings
+
+def init_logger():
+    logger = logging.getLogger("whatsapp_bot")
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler(
+        settings.log_file, when="midnight", backupCount=7, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    return logger
+
+logger = init_logger()
+
+# webhook.py
+from flask import request, Blueprint
+from parser import append_to_txt, bootstrap_conversation
+from query_engine import run_query
+from config import settings
+import json
+import http.client
+from logger import logger
+from datetime import datetime
+import pytz
+
+webhook_bp = Blueprint("webhook", __name__)
+_last_out = {}
+# load state
+if settings.state_file.exists():
+    _state = json.loads(settings.state_file.read_text(encoding="utf-8"))
+    _last_out = _state.get("last_outgoing", {})
+else:
+    _state = {"last_outgoing": {}}
+
+def send_whatsapp_message(to: str, text: str):
+    try:
+        conn = http.client.HTTPSConnection("api.ultramsg.com")
+        payload = json.dumps({
+            "token": settings.token,
+            "to": f"{to}@c.us",
+            "body": text
+        })
+        headers = {"Content-Type": "application/json"}
+        conn.request("POST", f"/{settings.instance_id}/messages/chat", payload, headers)
+        resp = conn.getresponse().read().decode()
+        logger.info(f"Sent message to {to}: {resp}")
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+
+@webhook_bp.route("/webhook", methods=["POST"])
+def whatsapp_webhook():
+    d = request.json.get("data", {})
+    typ = d.get("type")
+    fr = d.get("from", "")
+    fm = d.get("fromMe", False)
+    body = (d.get("body") or "").strip()
+
+    if fm and body.lower().startswith("/query "):
+        nl = body[len("/query "):].strip()
+        reply = run_query(nl)
+        send_whatsapp_message(fr.replace("@c.us", ""), reply)
+        return "queried", 200
+
+    if typ != "chat" or "@g.us" in fr or not body:
+        return "ignored", 200
+
+    if not fm:
+        phone = fr.replace("@c.us", "")
+        name = d.get("pushname") or phone
+        bootstrap_conversation(phone, name)
+        sender = name
+    else:
+        phone = d.get("to", "").replace("@c.us", "")
+        ts = datetime.now(pytz.timezone(settings.timezone)).strftime("%d/%m/%Y, %H:%M")
+        line = f"{ts} - You: {body}"
+        if _last_out.get(phone) == line:
+            return "dup", 200
+        _last_out[phone] = line
+        _state["last_outgoing"] = _last_out
+        settings.state_file.write_text(json.dumps(_state), encoding="utf-8")
+        sender = "You"
+
+    append_to_txt(phone, sender, body)
+    return "ok", 200
+
+@webhook_bp.route("/nl_query", methods=["POST"])
+def nl_query():
+    text = request.json.get("query","")
+    return run_query(text), 200
+
+@webhook_bp.route("/", methods=["GET"])
+def index():
+    return "Live", 200
+
+def register_routes(app):
+    app.register_blueprint(webhook_bp)
+
+
+# scheduler.py
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+from memory import ingest_whatsapp_chats
+from config import settings
+from summarizer import job_summarize
+from logger import logger
+
+def start_scheduler() -> BackgroundScheduler:
+    tz = pytz.timezone(settings.timezone)
+    sched = BackgroundScheduler(timezone=tz)
+    sched.add_job(
+        job_summarize,
+        trigger=CronTrigger.from_crontab(settings.cron_expression),
+        id="job_summarize"
+    )
+    sched.add_job(
+    ingest_whatsapp_chats,
+    trigger=CronTrigger(hour="1", minute=0),  # once a day at 1:00 AM
+    id="daily_memory_ingest"
+    )
+    sched.start()
+    logger.info("Scheduler started.")
+    return sched
+
+# memory.py
+"""
+RAG Memory Layer: Ingest WhatsApp chats into a FAISS vector store
+and provide a retrieval function — using Google Gemini for embeddings.
+"""
+import os
+from pathlib import Path
+import numpy as np
+import faiss
+from google import genai
+from google.genai.types import EmbedContentConfig
+from config import settings
+from parser import parse_whatsapp
+
+# 1. Configure your Gemini client
+#    Make sure settings.gemini_api_key is set to your Google API key.
+client = genai.Client(api_key=settings.gemini_api_key)
+
+# 2. Prepare persistence directory & file paths
+faiss_dir = settings.base_dir / "faiss_db"
+faiss_dir.mkdir(parents=True, exist_ok=True)
+INDEX_PATH = faiss_dir / "whatsapp.index"
+METAS_PATH  = faiss_dir / "whatsapp_metas.npy"
+
+# 3. Embedding model & dimension
+EMBED_MODEL = getattr(settings, "gemini_embedding_model", "text-embedding-004")
+DIM         = 768  # or 3072 if you choose the large model
+
+# 4. Initialize (or load) FAISS index & metadata list
+if INDEX_PATH.exists() and METAS_PATH.exists():
+    index = faiss.read_index(str(INDEX_PATH))
+    metas = np.load(str(METAS_PATH), allow_pickle=True).tolist()
+else:
+    index = faiss.IndexFlatIP(DIM)  # IP on normalized vectors = cosine
+    metas = []  # will hold dicts: uid, phone, sender, timestamp, message
+
+
+def _embed(texts: list[str]) -> np.ndarray:
+    """
+    Use Gemini to embed a list of texts and L2-normalize them.
+    """
+    response = client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=texts,
+        config=EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=DIM
+        ),
+    )
+    # extract the embedding values
+    vecs = np.array(
+        [emb.values for emb in response.embeddings],
+        dtype="float32"
+    )
+    faiss.normalize_L2(vecs)
+    return vecs
+
+
+def ingest_whatsapp_chats():
+    """
+    Walk through processed_exported_data/, parse each chat file, and upsert embeddings.
+    Skips messages already present (by unique uid).
+    """
+    seen_uids = {m["uid"] for m in metas}
+
+    for phone_dir in settings.processed_dir.iterdir():
+        if not phone_dir.is_dir():
+            continue
+        txt_file = phone_dir / f"{phone_dir.name}.txt"
+        if not txt_file.exists():
+            continue
+
+        msgs = parse_whatsapp(str(txt_file))
+        for m in msgs:
+            uid = f"{phone_dir.name}|{m['timestamp']}|{m['sender']}"
+            if uid in seen_uids:
+                continue
+
+            # embed & add to index
+            emb = _embed([m["message"]])
+            index.add(emb)
+
+            # record metadata
+            metas.append({
+                "uid":       uid,
+                "phone":     phone_dir.name,
+                "sender":    m["sender"],
+                "timestamp": m["timestamp"],
+                "message":   m["message"]
+            })
+            seen_uids.add(uid)
+
+    # persist to disk
+    faiss.write_index(index, str(INDEX_PATH))
+    np.save(str(METAS_PATH), np.array(metas, dtype=object), allow_pickle=True)
+
+
+def retrieve_context(query: str, top_k: int = 5) -> str:
+    """
+    Given a natural-language query, return the top_k most relevant chat excerpts as a text block.
+    """
+    q_emb = _embed([query])
+    distances, indices = index.search(q_emb, top_k)
+
+    lines = []
+    for dist, idx in zip(distances[0], indices[0]):
+        # only accept valid, non-negative indices
+        if idx < 0 or idx >= len(metas):
+            continue
+
+        meta = metas[idx]
+        lines.append(
+            f"{meta['timestamp']} | {meta['sender']} "
+            f"(Chat {meta['phone']}): {meta['message']}"
+        )
+
+    return "\n".join(lines)
+29/04/2025, 22:24 - Kunal Khadgi: yes
+29/04/2025, 22:24 - Kunal Khadgi: yes
+30/04/2025, 11:27 - 917058165928: WhatsApp API on UltraMsg.com works good
+30/04/2025, 11:27 - 917058165928: WhatsApp API on UltraMsg.com works good
+30/04/2025, 12:06 - Kunal Khadgi: hi
+30/04/2025, 12:10 - Kunal Khadgi: hello
+30/04/2025, 12:11 - Kunal Khadgi: hi
+30/04/2025, 12:20 - Kunal Khadgi: now
+30/04/2025, 12:21 - Kunal Khadgi: now
+30/04/2025, 12:21 - Kunal Khadgi: does it
+30/04/2025, 12:21 - Kunal Khadgi: store live
+30/04/2025, 12:21 - Kunal Khadgi: huh
+30/04/2025, 12:24 - Kunal Khadgi: print
+30/04/2025, 12:41 - Kunal Khadgi: now?
+30/04/2025, 12:42 - Kunal Khadgi: ???
+30/04/2025, 13:21 - Kunal Khadgi: .
+30/04/2025, 13:24 - Kunal Khadgi: .
+30/04/2025, 13:26 - Kunal Khadgi: ?
+30/04/2025, 13:27 - Kunal Khadgi: .
+30/04/2025, 13:27 - Kunal Khadgi: ??
+30/04/2025, 13:28 - Kunal Khadgi: n
+30/04/2025, 13:36 - Kunal Khadgi: n
+30/04/2025, 14:11 - Kunal Khadgi: ,.
+30/04/2025, 14:18 - Kunal Khadgi: .ku
+30/04/2025, 14:40 - You: ,
+30/04/2025, 14:40 - You: WhatsApp API on UltraMsg.com works good
+30/04/2025, 14:40 - Kunal Khadgi: .
+30/04/2025, 14:40 - Kunal Khadgi: I sent u the invoice of 10$
+30/04/2025, 14:40 - Kunal Khadgi: jsut last part is remaining from my side ... to integrate it with custom gpt
+30/04/2025, 14:40 - Kunal Khadgi: yes
+30/04/2025, 14:40 - Kunal Khadgi: invoice of 5$
+30/04/2025, 14:40 - Kunal Khadgi: https://chatgpt.com/share/6810ebd4-0e40-800b-a772-5533703da0a7
+30/04/2025, 14:40 - Kunal Khadgi: I have created a custom gpt named WhatsApp Chat in ur pro version
+30/04/2025, 14:40 - Kunal Khadgi: https://chatgpt.com/share/6810ebd4-0e40-800b-a772-5533703da0a7
+30/04/2025, 14:40 - Kunal Khadgi: I have created a custom gpt named WhatsApp Chat in ur pro version
+30/04/2025, 14:40 - Kunal Khadgi: can call now
+30/04/2025, 14:40 - Kunal Khadgi: have u logged in ultramsg and setup the webhook url?
+30/04/2025, 14:40 - Kunal Khadgi: currently only this data is stored in db
+30/04/2025, 14:40 - Kunal Khadgi: have u logged in ultramsg and setup the webhook url?
+30/04/2025, 14:40 - Kunal Khadgi: yes it will get linked ...
+30/04/2025, 14:40 - Kunal Khadgi: .
+30/04/2025, 14:41 - Kunal Khadgi: .
+30/04/2025, 14:41 - Kunal Khadgi: for WhatsApp msgs from ur chat
+30/04/2025, 14:41 - Kunal Khadgi: yes it will get linked ...
+30/04/2025, 14:41 - Kunal Khadgi: .
+30/04/2025, 14:41 - Kunal Khadgi: before logging out scrol a bit down and
+30/04/2025, 14:41 - Kunal Khadgi: logout > login using ur number > paste existing url
+30/04/2025, 14:41 - Kunal Khadgi: hi
+30/04/2025, 14:41 - Kunal Khadgi: hello
+30/04/2025, 14:41 - Kunal Khadgi: how are you
+30/04/2025, 14:41 - Kunal Khadgi: u want txt or files ??
+30/04/2025, 14:41 - Kunal Khadgi: # unified_app.py (FAST version)
+30/04/2025, 14:41 - Kunal Khadgi: # query_engine.py
+30/04/2025, 14:41 - Kunal Khadgi: 1. zip file uploads will be processed to txt files
+30/04/2025, 14:41 - Kunal Khadgi: u want txt or files ??
+30/04/2025, 14:41 - Kunal Khadgi: # query_engine.py
+30/04/2025, 14:41 - Kunal Khadgi: # unified_app.py (FAST version)
+30/04/2025, 14:41 - Kunal Khadgi: yes
+30/04/2025, 14:41 - 917058165928: WhatsApp API on UltraMsg.com works good
+30/04/2025, 14:41 - Kunal Khadgi: hi
+30/04/2025, 14:41 - Kunal Khadgi: hello
+30/04/2025, 14:41 - Kunal Khadgi: hi
+30/04/2025, 14:41 - Kunal Khadgi: now
+30/04/2025, 14:41 - Kunal Khadgi: does it
+30/04/2025, 14:41 - Kunal Khadgi: store live
+30/04/2025, 14:41 - Kunal Khadgi: huh
+30/04/2025, 14:41 - Kunal Khadgi: print
+30/04/2025, 14:41 - Kunal Khadgi: now?
+30/04/2025, 14:41 - Kunal Khadgi: ???
+30/04/2025, 14:41 - Kunal Khadgi: .
+30/04/2025, 14:41 - Kunal Khadgi: ?
+30/04/2025, 14:41 - Kunal Khadgi: .
+30/04/2025, 14:41 - Kunal Khadgi: ??
+30/04/2025, 14:41 - Kunal Khadgi: n
+30/04/2025, 14:41 - Kunal Khadgi: ,.
+30/04/2025, 14:41 - Kunal Khadgi: .ku
+30/04/2025, 15:09 - Kunal Khadgi: working for live chats??
+30/04/2025, 15:11 - Kunal Khadgi: appednde?

@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: chroma-bullet
+Version: 2.2.0
+Summary: Chromas fork of bullet - Beautiful Python prompts made simple.
+Home-page: https://github.com/chroma-core/bullet
+Author: THe chroma team and the original bullet author - Mckinsey666
+License: MIT
+Keywords: cli list prompt customize colors
+Requires-Python: >=3.6
+License-File: LICENSE
+
+Extensive support for Python list prompts             formatting and colors
