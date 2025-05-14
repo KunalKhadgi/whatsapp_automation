@@ -25,11 +25,60 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import tiktoken
 from dotenv import load_dotenv
 
+# Add GCS download logic at startup
+from google.cloud import storage
+
+def download_from_gcs(bucket_name, blob_name, destination_file_name):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    if blob.exists():
+        os.makedirs(os.path.dirname(destination_file_name), exist_ok=True)
+        blob.download_to_filename(destination_file_name)
+        print(f"Downloaded {blob_name} to {destination_file_name}")
+    else:
+        print(f"Blob {blob_name} does not exist in bucket {bucket_name}.")
+
+def download_directory_from_gcs(bucket_name, prefix, local_dir):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=prefix)
+    for blob in blobs:
+        # Remove the prefix from the blob name to get the relative path
+        rel_path = os.path.relpath(blob.name, prefix)
+        local_path = os.path.join(local_dir, rel_path)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        blob.download_to_filename(local_path)
+        print(f"Downloaded {blob.name} to {local_path}")
+
+def download_meta_jsons_from_gcs(bucket_name, prefix, local_dir):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blobs = bucket.list_blobs(prefix=prefix)
+    for blob in blobs:
+        if blob.name.endswith("meta.json"):
+            rel_path = os.path.relpath(blob.name, prefix)
+            local_path = os.path.join(local_dir, rel_path)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            blob.download_to_filename(local_path)
+            print(f"Downloaded {blob.name} to {local_path}")
+
+def download_from_gcs_if_missing(bucket_name, blob_name, destination_file_name):
+    if os.path.exists(destination_file_name):
+        print(f"Local file {destination_file_name} exists, skipping download.")
+        return
+    download_from_gcs(bucket_name, blob_name, destination_file_name)
+
+# Download vector DB files at startup
+BUCKET_NAME = "whatsapp-bot-2025-data"
+download_from_gcs_if_missing(BUCKET_NAME, "faiss_db/whatsapp.index", "faiss_db/whatsapp.index")
+download_from_gcs_if_missing(BUCKET_NAME, "faiss_db/whatsapp_metas.npy", "faiss_db/whatsapp_metas.npy")
+
 # Load environment variables
 load_dotenv()
 
-from parser import append_to_txt, bootstrap_conversation
-
+from parser import bootstrap_conversation
+# from parser import append_to_txt
 # ─── CONFIG & SETUP ─────────────────────────────────────────────────────────
 
 app           = Flask(__name__)
@@ -37,7 +86,7 @@ webhook_bp    = Blueprint("webhook", __name__)
 TZ            = pytz.timezone(os.getenv('TIMEZONE', 'Asia/Kolkata'))
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI()
 
 # FAISS
 EMBED_MODEL = os.getenv('EMBED_MODEL', 'text-embedding-3-small')
@@ -63,15 +112,33 @@ else:
 faiss_lock  = Lock()
 executor    = ThreadPoolExecutor(max_workers=int(os.getenv('MAX_WORKERS', '18')))
 
-# Contacts map (display_name → phone_dir)
+# Only download meta.json files for contact mapping
+BUCKET_NAME = "whatsapp-bot-2025-data"
+download_meta_jsons_from_gcs(BUCKET_NAME, "processed_exported_data/", "processed_exported_data/")
+
+# Build contacts dict after meta.json files are downloaded
 contacts = {}
 processed_dir = Path(os.getenv('PROCESSED_DIR', './processed_exported_data'))
 for d in processed_dir.iterdir():
     if not d.is_dir(): continue
     mf = d/"meta.json"
     if mf.exists():
-        nm = json.loads(mf.read_text()).get("display_name","").strip().lower()
-        if nm: contacts[nm] = d.name
+        try:
+            nm = json.loads(mf.read_text()).get("display_name","").strip().lower()
+            if nm:
+                contacts[nm] = d.name
+                print(f"Loaded contact: {nm} -> {d.name}")
+            else:
+                print(f"meta.json in {d} missing display_name or is empty")
+        except Exception as e:
+            print(f"Error reading {mf}: {e}")
+print(f"All loaded contacts: {contacts}")
+
+# After loading metas, build an in-memory chat_map for fast lookup
+from collections import defaultdict
+chat_map = defaultdict(list)
+for m in metas:
+    chat_map[m["phone"]].append(m)
 
 # ─── REGEX INTENTS ──────────────────────────────────────────────────────────
 
@@ -261,7 +328,7 @@ def process_message_event(raw:dict):
 
     # append to txt + embed
     ts_txt = datetime.now(TZ).strftime("%d/%m/%Y, %H:%M")
-    append_to_txt(chat_id,sender,body,timestamp=ts_txt)
+    # append_to_txt(chat_id,sender,body,timestamp=ts_txt)
     embed_and_persist(chat_id,sender,body,datetime.now(TZ).isoformat(),
                       "outgoing" if fm else "incoming")
 
@@ -817,7 +884,7 @@ def find_chat():
     if not phone:
         return jsonify(error=f'No contact for "{target}"'), 404
 
-    chat_msgs = [m for m in metas if m["phone"]==phone]
+    chat_msgs = chat_map.get(phone, [])
     if not chat_msgs:
         return jsonify(error=f'No messages for "{target}"'), 404
 
@@ -881,16 +948,18 @@ def whatsapp_webhook():
 
 @app.route("/contacts", methods=["GET"])
 def list_contacts():
-    return jsonify([
+    response = [
         {"name": name.title(), "phone": phone}
         for name, phone in contacts.items()
-    ])
+    ]
+    print(f"/contacts endpoint response: {response}")
+    return jsonify(response)
 
 # Register the webhook blueprint
 app.register_blueprint(webhook_bp)
 
 if __name__ == "__main__":
-    print("Starting server...")
-    print("Visit http://localhost:5000 for API documentation")
-    app.run(host="0.0.0.0", port=5000)
-
+    port = int(os.environ.get("PORT", 5000))  # use Cloud Run's dynamic port if set
+    print(f"Starting server on port {port}...")
+    print(f"Visit http://localhost:{port} for API documentation")
+    app.run(host="0.0.0.0", port=port, debug=False)

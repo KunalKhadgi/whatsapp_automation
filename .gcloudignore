@@ -1,0 +1,30 @@
+# Virtual environments
+update-message-venv/
+venv/
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files
+.env
+*.env
+
+# Unnecessary artifacts
+*.sqlite3
+*.log
+*.bak
+.DS_Store
+
+# IDE files
+.idea/
+.vscode/
+
+# Local data (keep faiss_db explicitly)
+exported_data/
+processed_exported_data/
+processed_zips/
+faiss_db/

@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./exported_data:/app/exported_data
+      - ./processed_exported_data:/app/processed_exported_data
+      - ./faiss_db:/app/faiss_db
+      - ./processed_zips:/app/processed_zips
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
