@@ -1,0 +1,20 @@
+name: Local models
+version: 0.0.1
+schema: v1
+
+models:
+  - provider: ollama
+    model: qwen2.5-coder:3b.q4_0 # quantized for faster CPU inference
+    apiBase: http://localhost:11434
+    name: Qwen 3B (Ollama q4_0)
+    roles:
+      - chat
+      - code-completion
+
+  - provider: ollama
+    model: deepseek-r1:3b # your 8 B model for high-quality chats
+    apiBase: http://localhost:11434
+    name: Deepseek R1 8B
+    roles:
+      - chat
+      - edit
