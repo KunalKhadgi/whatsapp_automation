@@ -30,6 +30,7 @@ var/
 .vscode/
 *.swp
 *.swo
+.continue/
 
 # Logs
 *.log
