@@ -3,7 +3,7 @@
 Refactored WhatsApp Processor (Shortened Version)
 """
 
-import os, re
+import os, re, datetime
 from flask import Flask, request, jsonify, Blueprint
 from dotenv import load_dotenv
 from utils.gcs_utils import download_from_gcs, download_meta_jsons_from_gcs, upload_to_gcs
@@ -125,18 +125,27 @@ def webhook():
     display = raw.get("chatName") or raw.get("pushname") or chat_id
     sender = raw.get("author", "").split(":")[0].replace("@c.us", "") if "@g.us" in addr else display
     body = raw.get("body", "")
+    now_iso = datetime.now().isoformat()
+    direction = "outgoing" if raw.get("fromMe", False) else "incoming"
     bootstrap_conversation(chat_id, display)
     text = f"{sender}: {body}"
     vec = embed_texts([text])
     with faiss_lock:
         index.add(vec)
     metas.append({
-        "uid": f"{chat_id}|live",
-        "phone": chat_id,
-        "text": text,
-        "timestamp_start": datetime.now().isoformat(),
-        "timestamp_end": datetime.now().isoformat()
+        "uid":            f"{chat_id}|{len([m for m in metas if m['phone']==chat_id])}|single",
+        "phone":          chat_id,
+        "start_idx":      len([m for m in metas if m['phone']==chat_id]),
+        "end_idx":        len([m for m in metas if m['phone']==chat_id]) + 1,
+        "timestamp_start":now_iso,
+        "timestamp_end":  now_iso,
+        "text":           text,
+        "raw_messages":   [{"timestamp":now_iso, "sender":sender, "message":body, "direction": direction}],
+        "sender_list":    [sender],
+        "direction_list": [direction],
+        "chat_type":      "group" if "@g.us" in raw.get("from","") else "individual"
     })
+
     faiss.write_index(index, FAISS_INDEX)
     np.save(FAISS_METAS, np.array(metas, object), allow_pickle=True)
     return "ok", 200

@@ -30,10 +30,9 @@ def download_meta_jsons_from_gcs(bucket_name, prefix, local_dir):
         if blob.name.endswith("meta.json"):
             rel = os.path.relpath(blob.name, prefix)
             path = os.path.join(local_dir, rel)
-            print(f"[GCS] Downloading meta.json: gs://{bucket_name}/{blob.name} → {path}")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             blob.download_to_filename(path)
-            print(f"[GCS] Downloaded meta.json to: {path}")
+    print(f"[GCS] Downloaded meta.json to: {bucket_name}")
 
 def upload_to_gcs(local_path, bucket_name, destination_blob_name):
     print(f"[GCS] Starting upload: {local_path} → gs://{bucket_name}/{destination_blob_name}")

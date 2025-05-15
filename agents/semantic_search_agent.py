@@ -131,7 +131,7 @@ Return *only* the JSON.
 
         # If they asked for only the last N messages, slice; otherwise take whole chat
         count = params.get("count")
-        chat_msgs.sort(key=lambda m: m["timestamp"])
+        chat_msgs.sort(key=lambda m: m["timestamp_start"])
         msgs = chat_msgs[-count:] if count else chat_msgs
 
         # dynamic batching under token limit
